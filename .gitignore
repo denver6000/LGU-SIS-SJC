@@ -1,0 +1,42 @@
+# Firebase / local emulator state
+.firebase/
+firebase-debug.log*
+firestore-debug.log*
+ui-debug.log*
+database-debug.log*
+storage-debug.log*
+
+# Dependencies and caches
+node_modules/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Local environment and credentials
+.env
+.env.*
+!.env.example
+.secrets/
+secrets/
+serviceAccount*.json
+service-account*.json
+*-service-account*.json
+*firebase-adminsdk*.json
+firebase-service-account*.json
+google-application-credentials*.json
+
+# Generated/local data artifacts
+outputs/
+*.local.json
+
+# Internal import/migration tooling
+scripts/import_*.py
+scripts/*_import.py
+scripts/migrate_*.py
+scripts/*_migration.py
+BATCH*.xlsx
+*.import.xlsx
+*.migration.xlsx
+public/data/batch_options.seed.json
+public/data/*.import.json
+public/data/*.migration.json
