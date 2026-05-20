@@ -2,10 +2,7 @@
 const nextConfig = {
   reactStrictMode: true,
   output: "standalone",
-  outputFileTracingRoot: import.meta.dirname,
-  outputFileTracingIncludes: {
-    "/*": ["./node_modules/next/**/*"]
-  }
+  outputFileTracingRoot: import.meta.dirname
 };
 
 export default nextConfig;
