@@ -1,7 +1,11 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
-  outputFileTracingRoot: import.meta.dirname
+  output: "standalone",
+  outputFileTracingRoot: import.meta.dirname,
+  outputFileTracingIncludes: {
+    "/*": ["./node_modules/next/**/*"]
+  }
 };
 
 export default nextConfig;
