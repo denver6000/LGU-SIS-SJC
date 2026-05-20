@@ -1,4 +1,5 @@
 import {
+  createManagedUser,
   deleteBarangay,
   deleteBatch,
   deleteCourse,
@@ -28,7 +29,7 @@ import {
   signOutUser,
   storageMode,
   updateStudent
-} from "./store.js?v=firebase-auth-login-20260514";
+} from "./store.js?v=role-claims-functions-20260520";
 import { PayrollExportService, StudentExportService } from "./export-service.js?v=excel-total-j25-20260513";
 
 const documentFields = [
@@ -144,6 +145,9 @@ const defaultCourseOptions = [
 
 const defaultBatchOptions = ["1", "2", "3", "4", "5", "6", "7"];
 
+const ROLE_ADMIN = "admin";
+const ROLE_USER = "user";
+
 const state = {
   students: [],
   schoolCourses: [],
@@ -157,11 +161,41 @@ const state = {
   selectedRenewalStudentId: null,
   selectedPayrollStudentIds: new Set(),
   currentUser: null,
+  currentUserClaims: {},
+  currentUserRole: null,
+  pendingSignedOutAuthMessage: null,
   authUnsubscribe: null,
   authEventsBound: false,
   appEventsBound: false,
-  appStarted: false
+  appStarted: false,
+  studentRowsClusterize: null,
+  payoutRecordsByStudentId: new Map(),
+  studentPayoutFlags: new Map()
 };
+
+function getUserRoleLabel(role) {
+  if (role === ROLE_ADMIN) return "Admin";
+  if (role === ROLE_USER) return "User";
+  return "Unauthorized";
+}
+
+function userHasAppAccess() {
+  return state.currentUserRole === ROLE_ADMIN || state.currentUserRole === ROLE_USER;
+}
+
+function userCanDeleteStudent() {
+  return state.currentUserRole === ROLE_ADMIN;
+}
+
+function userCanManageUsers() {
+  return state.currentUserRole === ROLE_ADMIN;
+}
+
+function renderRoleGatedUi() {
+  qsa("[data-admin-only]").forEach((element) => {
+    element.hidden = !userCanManageUsers();
+  });
+}
 
 const payrollExportService = new PayrollExportService();
 const studentExportService = new StudentExportService();
@@ -258,13 +292,64 @@ function setAuthMessage(message, type = "info") {
   el.dataset.type = type;
 }
 
+function userDisplayName(user = state.currentUser, claims = state.currentUserClaims) {
+  const explicitName = user?.displayName || claims?.name || claims?.displayName || "";
+  if (explicitName) return explicitName;
+  const email = user?.email || "";
+  const localPart = email.split("@")[0] || "User";
+  return localPart
+    .split(/[._-]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function userInitials(name) {
+  return String(name || "SJ")
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part.charAt(0).toUpperCase())
+    .join("") || "SJ";
+}
+
+function isMobileLayout() {
+  return window.matchMedia("(max-width: 820px)").matches;
+}
+
+function setSidebarOpen(isOpen) {
+  document.body.dataset.sidebar = isOpen ? "open" : "closed";
+  const scrim = qs("#navScrim");
+  const toggle = qs("#openSidebar");
+  if (scrim) scrim.hidden = !isOpen;
+  if (toggle) toggle.setAttribute("aria-expanded", String(isOpen));
+}
+
+function closeSidebar() {
+  setSidebarOpen(false);
+}
+
+function openSidebar() {
+  if (isMobileLayout()) setSidebarOpen(true);
+}
+
 function setAuthUi(user) {
   const isSignedIn = Boolean(user);
   qs("#authView").hidden = isSignedIn;
   qs("#appTopbar").hidden = !isSignedIn;
   qs("#appLayout").hidden = !isSignedIn;
-  qs("#signedInUser").textContent = user?.email || "";
+  const roleLabel = getUserRoleLabel(state.currentUserRole);
+  const displayName = userDisplayName(user);
+  const email = user?.email || "";
+  qs("#signedInUser").textContent = displayName && email ? `${displayName} • ${roleLabel}` : "";
+  qs("#sidebarUserName").textContent = displayName || "Signed In User";
+  qs("#sidebarUserRole").textContent = roleLabel;
+  qs("#sidebarUserEmail").textContent = email || "No email available";
+  qs("#profileAvatar").textContent = userInitials(displayName);
   document.body.dataset.auth = isSignedIn ? "signed-in" : "signed-out";
+  document.body.dataset.role = state.currentUserRole || "none";
+  document.body.dataset.sidebar = "closed";
+  renderRoleGatedUi();
 }
 
 function setLoginBusy(isBusy) {
@@ -279,31 +364,30 @@ function setLoginBusy(isBusy) {
 
 function currentRouteView() {
   const view = new URLSearchParams(window.location.search).get("view");
-  return viewNames.includes(view) ? view : "home";
+  return viewNames.includes(view) ? view : "dashboard";
 }
 
 function urlForView(view) {
   const url = new URL(window.location.href);
-  if (view === "home") {
-    url.searchParams.delete("view");
-  } else {
-    url.searchParams.set("view", view);
-  }
+  url.searchParams.set("view", view);
   return `${url.pathname}${url.search}${url.hash}`;
 }
 
 function setView(view, options = {}) {
-  const nextView = viewNames.includes(view) ? view : "home";
-  const isHome = nextView === "home";
+  const nextView = viewNames.includes(view) ? view : "dashboard";
   qsa("[data-view]").forEach((section) => {
-    section.hidden = isHome || section.dataset.view !== nextView;
+    section.hidden = section.dataset.view !== nextView;
   });
   qsa("[data-nav]").forEach((button) => {
     button.classList.toggle("active", button.dataset.nav === nextView);
   });
-  qs(".action-nav").hidden = !isHome;
-  qs("#backToActions").hidden = isHome;
-  document.body.dataset.page = isHome ? "home" : nextView;
+  document.body.dataset.page = nextView;
+  if (nextView === "records") {
+    requestAnimationFrame(() => {
+      renderStudents();
+      refreshStudentRowsVirtualizer(true);
+    });
+  }
   if (options.push !== false && urlForView(nextView) !== `${window.location.pathname}${window.location.search}${window.location.hash}`) {
     window.history.pushState({ view: nextView }, "", urlForView(nextView));
   }
@@ -311,6 +395,7 @@ function setView(view, options = {}) {
 
 function navigateToView(view) {
   setView(view);
+  if (isMobileLayout()) closeSidebar();
 }
 
 async function renderIcons() {
@@ -467,28 +552,66 @@ function studentKey(student) {
   return String(student?.student_id || "");
 }
 
+function sortStudentsByBatchAndLastName(students) {
+  return [...students].sort((a, b) => {
+    const batchA = parseInt(a.batch || "0", 10);
+    const batchB = parseInt(b.batch || "0", 10);
+
+    if (batchA !== batchB) {
+      return batchA - batchB;
+    }
+
+    const lastNameA = (a.full_name || "").split(" ").pop().toLowerCase();
+    const lastNameB = (b.full_name || "").split(" ").pop().toLowerCase();
+
+    return lastNameA.localeCompare(lastNameB);
+  });
+}
+
+function rebuildPayoutIndexes() {
+  const payoutRecordsByStudentId = new Map();
+
+  state.payoutRecords.forEach((record) => {
+    const id = String(record?.student_id || "");
+    if (!id) return;
+    const records = payoutRecordsByStudentId.get(id) || [];
+    records.push(record);
+    payoutRecordsByStudentId.set(id, records);
+  });
+
+  payoutRecordsByStudentId.forEach((records, id) => {
+    records.sort((a, b) => String(b.created_at || "").localeCompare(String(a.created_at || "")));
+    state.studentPayoutFlags.set(id, {
+      claimed: records.some((record) => ["subsidy_claim", "payout_release"].includes(record.type)),
+      renewed: records.some((record) => record.type === "renewal_tracking"),
+      payrolled: records.some((record) => record.type === "payroll_prepared"),
+      latest: records[0] || null
+    });
+  });
+
+  state.payoutRecordsByStudentId = payoutRecordsByStudentId;
+}
+
 function payoutRecordsForStudent(student) {
   const id = studentKey(student);
   if (!id) return [];
-  return state.payoutRecords
-    .filter((record) => record.student_id === id)
-    .sort((a, b) => String(b.created_at || "").localeCompare(String(a.created_at || "")));
+  return state.payoutRecordsByStudentId.get(id) || [];
 }
 
 function hasPreviousPayout(student) {
-  return payoutRecordsForStudent(student).some((record) => ["subsidy_claim", "payout_release"].includes(record.type));
+  return Boolean(state.studentPayoutFlags.get(studentKey(student))?.claimed);
 }
 
 function hasRenewalTracking(student) {
-  return payoutRecordsForStudent(student).some((record) => record.type === "renewal_tracking");
+  return Boolean(state.studentPayoutFlags.get(studentKey(student))?.renewed);
 }
 
 function hasPayrollPreparation(student) {
-  return payoutRecordsForStudent(student).some((record) => record.type === "payroll_prepared");
+  return Boolean(state.studentPayoutFlags.get(studentKey(student))?.payrolled);
 }
 
 function latestPayoutRecord(student) {
-  return payoutRecordsForStudent(student)[0] || null;
+  return state.studentPayoutFlags.get(studentKey(student))?.latest || null;
 }
 
 function buildPayoutRecord(student, overrides = {}) {
@@ -528,6 +651,40 @@ function updatePayrollSelectionSummary() {
   updateActionCounts();
 }
 
+function selectAllPayrollStudents() {
+  const students = filteredPayrollStudents();
+  if (!students.length) {
+    setStatus("No students match the current payroll filters.", "error");
+    return;
+  }
+
+  const remainingSlots = Math.max(0, 15 - state.selectedPayrollStudentIds.size);
+  const unselectedStudents = students.filter((student) => !state.selectedPayrollStudentIds.has(studentKey(student)));
+
+  if (!remainingSlots && unselectedStudents.length) {
+    setStatus("Payroll export is limited to 15 selected students.", "error");
+    return;
+  }
+
+  const studentsToAdd = unselectedStudents.slice(0, remainingSlots);
+  studentsToAdd.forEach((student) => state.selectedPayrollStudentIds.add(studentKey(student)));
+
+  renderStudents();
+  renderPayrollStudents();
+
+  if (!studentsToAdd.length) {
+    setStatus("All matching payroll students are already selected.");
+    return;
+  }
+
+  if (studentsToAdd.length < unselectedStudents.length) {
+    setStatus(`Selected ${studentsToAdd.length} additional student(s). Payroll export is limited to 15 students.`, "info", { dialog: false });
+    return;
+  }
+
+  setStatus(`Selected ${studentsToAdd.length} payroll student(s).`, "info", { dialog: false });
+}
+
 function togglePayrollSelection(input) {
   const selectedId = input.dataset.selectPayroll;
   if (!selectedId) return;
@@ -563,7 +720,7 @@ function filteredPayrollStudents() {
 }
 
 function filterStudentRecords(search, filter, batch = "") {
-  return state.students.filter((student) => {
+  const filtered = state.students.filter((student) => {
     const haystack = [
       student.student_id,
       student.full_name,
@@ -573,7 +730,9 @@ function filterStudentRecords(search, filter, batch = "") {
     ].join(" ").toLowerCase();
 
     if (search && !haystack.includes(search)) return false;
-    if (batch && student.batch !== batch) return false;
+    if (batch === "none") {
+      if (student.batch) return false;
+    } else if (batch && student.batch !== batch) return false;
     if (filter === "renewed" && !hasRenewalTracking(student)) return false;
     if (filter === "unrenewed" && hasRenewalTracking(student)) return false;
     if (filter === "claimed" && !hasPreviousPayout(student)) return false;
@@ -583,6 +742,8 @@ function filterStudentRecords(search, filter, batch = "") {
     if (filter === "incomplete" && completionStatus(student) === "Complete") return false;
     return true;
   });
+
+  return sortStudentsByBatchAndLastName(filtered);
 }
 
 function filteredRenewalStudents() {
@@ -591,7 +752,7 @@ function filteredRenewalStudents() {
   const year = qs("#renewalYearFilter").value;
   const renewalStatus = qs("#renewalStatusFilter").value;
 
-  return state.students.filter((student) => {
+  const filtered = state.students.filter((student) => {
     if (!hasPreviousPayout(student)) return false;
 
     const haystack = [
@@ -604,12 +765,16 @@ function filteredRenewalStudents() {
     ].join(" ").toLowerCase();
 
     if (search && !haystack.includes(search)) return false;
-    if (batch && student.batch !== batch) return false;
+    if (batch === "none") {
+      if (student.batch) return false;
+    } else if (batch && student.batch !== batch) return false;
     if (year && student.year_level !== year) return false;
     if (renewalStatus === "pending" && hasRenewalTracking(student)) return false;
     if (renewalStatus === "renewed" && !hasRenewalTracking(student)) return false;
     return true;
   });
+
+  return sortStudentsByBatchAndLastName(filtered);
 }
 
 function updateRenewalSelectionSummary() {
@@ -651,8 +816,36 @@ function renderRenewalStudents() {
   updateRenewalSelectionSummary();
 }
 
-function renderStudents() {
-  const rows = filteredStudents().map((student) => `
+function recordsViewIsVisible() {
+  const recordsView = qs("[data-view='records']");
+  return Boolean(recordsView && !recordsView.hidden);
+}
+
+function ensureStudentRowsVirtualizer(rows = []) {
+  if (state.studentRowsClusterize) return state.studentRowsClusterize;
+  if (!recordsViewIsVisible()) return null;
+  if (typeof window.Clusterize !== "function") return null;
+
+  state.studentRowsClusterize = new window.Clusterize({
+    rows,
+    scrollElem: qs("#studentRowsScroll"),
+    contentElem: qs("#studentRows"),
+    tag: "tr",
+    rows_in_block: 40,
+    blocks_in_cluster: 4,
+    no_data_text: "No matching student records."
+  });
+
+  return state.studentRowsClusterize;
+}
+
+function refreshStudentRowsVirtualizer(force = false) {
+  if (!state.studentRowsClusterize) return;
+  requestAnimationFrame(() => state.studentRowsClusterize?.refresh(force));
+}
+
+function studentRecordRow(student) {
+  return `
     <tr>
       <td>
         <input
@@ -679,13 +872,29 @@ function renderStudents() {
           <button type="button" data-view-student="${escapeHtml(student.student_id)}">View</button>
           <button type="button" data-edit="${escapeHtml(student.student_id)}">Edit</button>
           <button type="button" data-claim="${escapeHtml(student.student_id)}">Claim</button>
-          <button type="button" data-delete="${escapeHtml(student.student_id)}" class="danger">Trash</button>
+          ${userCanDeleteStudent() ? `<button type="button" data-delete="${escapeHtml(student.student_id)}" class="danger">Trash</button>` : ""}
         </div>
       </td>
     </tr>
-  `).join("");
+  `;
+}
 
-  qs("#studentRows").innerHTML = rows || `<tr><td colspan="11" class="empty-state">No matching student records.</td></tr>`;
+function renderStudents() {
+  const clusterize = ensureStudentRowsVirtualizer();
+  if (!recordsViewIsVisible() && !clusterize) {
+    updatePayrollSelectionSummary();
+    return;
+  }
+
+  const rows = filteredStudents().map(studentRecordRow);
+
+  if (clusterize) {
+    clusterize.update(rows);
+    refreshStudentRowsVirtualizer();
+  } else {
+    qs("#studentRows").innerHTML = rows.join("") || `<tr><td colspan="11" class="empty-state">No matching student records.</td></tr>`;
+  }
+
   updatePayrollSelectionSummary();
 }
 
@@ -731,7 +940,9 @@ function filteredTrashStudents() {
       student.batch
     ].join(" ").toLowerCase();
     if (search && !haystack.includes(search)) return false;
-    if (batch && student.batch !== batch) return false;
+    if (batch === "none") {
+      if (student.batch) return false;
+    } else if (batch && student.batch !== batch) return false;
     return true;
   });
 }
@@ -751,7 +962,7 @@ function renderTrash() {
       <td>
         <div class="row-actions">
           <button type="button" data-restore="${escapeHtml(student.student_id)}">Restore</button>
-          <button type="button" data-delete-forever="${escapeHtml(student.student_id)}" class="danger">Delete</button>
+          ${userCanDeleteStudent() ? `<button type="button" data-delete-forever="${escapeHtml(student.student_id)}" class="danger">Delete</button>` : ""}
         </div>
       </td>
     </tr>
@@ -801,7 +1012,9 @@ function filteredPayoutRecords() {
       record.notes
     ].join(" ").toLowerCase();
     if (search && !haystack.includes(search)) return false;
-    if (batch && record.batch !== batch) return false;
+    if (batch === "none") {
+      if (record.batch) return false;
+    } else if (batch && record.batch !== batch) return false;
     return true;
   });
 }
@@ -1031,10 +1244,12 @@ async function refresh() {
     state.schoolCourses = schoolCourses;
     state.trash = trash;
     state.payoutRecords = payoutRecords;
+    state.studentPayoutFlags = new Map();
     state.barangays = barangays;
     state.schools = schools;
     state.courses = courses;
     state.batches = batches;
+    rebuildPayoutIndexes();
     if (await ensureBatchWorkbookOptions()) {
       [state.barangays, state.schools, state.batches] = await Promise.all([getBarangays(), getSchools(), getBatches()]);
     }
@@ -1078,8 +1293,16 @@ function bindEvents() {
   if (state.appEventsBound) return;
   state.appEventsBound = true;
   qsa("[data-nav]").forEach((button) => button.addEventListener("click", () => navigateToView(button.dataset.nav)));
-  qs("#backToActions").addEventListener("click", () => navigateToView("home"));
+  qs("#openSidebar").addEventListener("click", openSidebar);
+  qs("#navScrim").addEventListener("click", closeSidebar);
+  window.addEventListener("resize", () => {
+    if (!isMobileLayout()) closeSidebar();
+  });
+  window.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") closeSidebar();
+  });
   qs("#signOut").addEventListener("click", async () => {
+    closeSidebar();
     await signOutUser();
     setStatus("Signed out.", "info", { dialog: false });
   });
@@ -1101,6 +1324,7 @@ function bindEvents() {
   qs("#renewalYearFilter").addEventListener("change", renderRenewalStudents);
   qs("#renewalStatusFilter").addEventListener("change", renderRenewalStudents);
   qs("#exportStudents").addEventListener("click", exportPayrollWord);
+  qs("#selectAllPayroll").addEventListener("click", selectAllPayrollStudents);
   qs("#clearPayrollSelection").addEventListener("click", () => {
     state.selectedPayrollStudentIds.clear();
     renderStudents();
@@ -1170,6 +1394,24 @@ function bindEvents() {
     event.currentTarget.reset();
     setStatus("Batch saved.");
     await refresh();
+  });
+
+  qs("#userManagementForm").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (!userCanManageUsers()) {
+      setStatus("Only admins can create managed users.", "error");
+      return;
+    }
+
+    const form = event.currentTarget;
+    const payload = Object.fromEntries(new FormData(form).entries());
+
+    await withLoading("Creating user account...", async () => {
+      const result = await createManagedUser(payload);
+      setStatus(`Created ${result.role} user: ${result.email}.`);
+    });
+
+    form.reset();
   });
 
   qs("#loadDefaultBarangays").addEventListener("click", async () => {
@@ -1276,9 +1518,15 @@ function bindEvents() {
         notes: "Subsidy claim/release recorded from listing action."
       })));
     }
-    if (deleteId) await withLoading("Moving student to trash...", () => moveStudentToTrash(deleteId));
+    if (deleteId) {
+      if (!userCanDeleteStudent()) {
+        setStatus("You do not have permission to delete student records.", "error");
+      } else {
+        await withLoading("Moving student to trash...", () => moveStudentToTrash(deleteId));
+      }
+    }
 
-    if (claimId || deleteId) {
+    if (claimId || (deleteId && userCanDeleteStudent())) {
       setStatus("Record updated.");
       await refresh();
     }
@@ -1294,9 +1542,13 @@ function bindEvents() {
       await refresh();
     }
     if (deleteForeverId) {
-      await withLoading("Deleting trash record...", () => deleteTrashStudent(deleteForeverId));
-      setStatus("Student permanently deleted from trash.");
-      await refresh();
+      if (!userCanDeleteStudent()) {
+        setStatus("You do not have permission to permanently delete student records.", "error");
+      } else {
+        await withLoading("Deleting trash record...", () => deleteTrashStudent(deleteForeverId));
+        setStatus("Student permanently deleted from trash.");
+        await refresh();
+      }
     }
   });
 
@@ -1374,17 +1626,37 @@ async function initAuth() {
   setAuthMessage("Checking sign-in...");
 
   try {
-    state.authUnsubscribe = await onAuthUserChanged(async (user) => {
-      state.currentUser = user;
+    state.authUnsubscribe = await onAuthUserChanged(async (session) => {
       setLoading(false);
 
-      if (!user) {
+      if (!session?.user) {
+        state.currentUser = null;
+        state.currentUserClaims = {};
+        state.currentUserRole = null;
         setAuthUi(null);
-        setAuthMessage("Sign in with your Firebase account.");
+        if (state.pendingSignedOutAuthMessage) {
+          setAuthMessage(state.pendingSignedOutAuthMessage.message, state.pendingSignedOutAuthMessage.type);
+          state.pendingSignedOutAuthMessage = null;
+        } else {
+          setAuthMessage("Sign in with your Firebase account.");
+        }
         return;
       }
 
-      setAuthUi(user);
+      state.currentUser = session.user;
+      state.currentUserClaims = session.claims || {};
+      state.currentUserRole = session.role;
+
+      if (!userHasAppAccess()) {
+        state.pendingSignedOutAuthMessage = {
+          message: "Your account is signed in but does not have an assigned app role. Ask an admin to set an 'admin' or 'user' claim.",
+          type: "error"
+        };
+        await signOutUser();
+        return;
+      }
+
+      setAuthUi(session.user);
       setAuthMessage("");
       try {
         await startApp();

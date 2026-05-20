@@ -29,6 +29,7 @@
         <label for="loginPassword">Password</label>
         <input id="loginPassword" name="password" type="password" autocomplete="current-password" required>
       </div>
+      <p class="auth-note">Access is controlled by Firebase Authentication and custom role claims assigned to your account.</p>
       <p class="auth-message" id="authMessage" aria-live="polite"></p>
       <div class="actions auth-actions">
         <button type="submit" class="primary" id="loginSubmit">Sign In</button>
@@ -37,60 +38,142 @@
   </section>
 
   <header class="topbar" id="appTopbar" hidden>
-    <div class="brand">
-      <div class="brand-mark">SJ</div>
-      <div>
-        <p>San Jose City Educational Assistance</p>
-        <h1>Student Information System</h1>
+    <div class="topbar-leading">
+      <button type="button" class="nav-toggle" id="openSidebar" aria-controls="appSidebar" aria-expanded="false" aria-label="Open navigation">
+        <i data-lucide="panel-left" aria-hidden="true"></i>
+      </button>
+      <div class="brand">
+        <div class="brand-mark">SJ</div>
+        <div>
+          <p>San Jose City Educational Assistance</p>
+          <h1>Student Information System</h1>
+        </div>
       </div>
     </div>
     <div class="header-actions">
       <span class="signed-in-user" id="signedInUser"></span>
-      <button type="button" id="backToActions" hidden>Back to Actions</button>
-      <button type="button" id="signOut">Sign Out</button>
     </div>
   </header>
 
+  <div class="nav-scrim" id="navScrim" hidden></div>
+
   <div class="layout" id="appLayout" hidden>
-    <nav class="action-nav" aria-label="Primary actions">
-      <button type="button" data-nav="dashboard"><i data-lucide="layout-dashboard" aria-hidden="true"></i><span>Dashboard</span><strong class="action-count" data-count-for="dashboard">0</strong></button>
-      <button type="button" data-nav="register"><i data-lucide="user-round-plus" aria-hidden="true"></i><span>Student Registry</span><strong class="action-count" data-count-for="register">0</strong></button>
-      <button type="button" data-nav="renewal"><i data-lucide="repeat-2" aria-hidden="true"></i><span>Renewal Tracking</span><strong class="action-count" data-count-for="renewal">0</strong></button>
-      <button type="button" data-nav="records"><i data-lucide="clipboard-list" aria-hidden="true"></i><span>Scholarship Listing</span><strong class="action-count" data-count-for="records">0</strong></button>
-      <button type="button" data-nav="payouts"><i data-lucide="receipt-text" aria-hidden="true"></i><span>Payout Records</span><strong class="action-count" data-count-for="payouts">0</strong></button>
-      <button type="button" data-nav="import"><i data-lucide="file-up" aria-hidden="true"></i><span>Scholarship Import</span><strong class="action-count" data-count-for="import">0</strong></button>
-      <button type="button" data-nav="setup"><i data-lucide="sliders-horizontal" aria-hidden="true"></i><span>School / Course Setup</span><strong class="action-count" data-count-for="setup">0</strong></button>
-      <button type="button" data-nav="exports"><i data-lucide="file-down" aria-hidden="true"></i><span>Payroll & Exports</span><strong class="action-count" data-count-for="exports">0</strong></button>
-      <button type="button" data-nav="trash"><i data-lucide="trash-2" aria-hidden="true"></i><span>Trash</span><strong class="action-count" data-count-for="trash">0</strong></button>
-    </nav>
+    <aside class="app-sidebar" id="appSidebar" aria-label="Primary routes and actions">
+      <div class="sidebar-shell">
+        <div class="sidebar-profile">
+          <div class="profile-avatar" id="profileAvatar">SJ</div>
+          <div class="profile-copy">
+            <strong id="sidebarUserName">Signed In User</strong>
+            <span id="sidebarUserRole">Role</span>
+            <span id="sidebarUserEmail">email@example.com</span>
+          </div>
+        </div>
+
+        <div class="sidebar-toolbar">
+          <button type="button" class="sidebar-utility" id="signOut">
+            <i data-lucide="log-out" aria-hidden="true"></i>
+            <span>Sign Out</span>
+          </button>
+        </div>
+
+        <nav class="action-nav" aria-label="Primary actions">
+          <button type="button" data-nav="dashboard"><i data-lucide="layout-dashboard" aria-hidden="true"></i><span>Dashboard</span><strong class="action-count" data-count-for="dashboard">0</strong></button>
+          <button type="button" data-nav="register"><i data-lucide="user-round-plus" aria-hidden="true"></i><span>Student Registry</span><strong class="action-count" data-count-for="register">0</strong></button>
+          <button type="button" data-nav="renewal"><i data-lucide="repeat-2" aria-hidden="true"></i><span>Renewal Tracking</span><strong class="action-count" data-count-for="renewal">0</strong></button>
+          <button type="button" data-nav="records"><i data-lucide="clipboard-list" aria-hidden="true"></i><span>Scholarship Listing</span><strong class="action-count" data-count-for="records">0</strong></button>
+          <button type="button" data-nav="payouts"><i data-lucide="receipt-text" aria-hidden="true"></i><span>Payout Records</span><strong class="action-count" data-count-for="payouts">0</strong></button>
+          <button type="button" data-nav="import"><i data-lucide="file-up" aria-hidden="true"></i><span>Scholarship Import</span><strong class="action-count" data-count-for="import">0</strong></button>
+          <button type="button" data-nav="setup"><i data-lucide="sliders-horizontal" aria-hidden="true"></i><span>School / Course Setup</span><strong class="action-count" data-count-for="setup">0</strong></button>
+          <button type="button" data-nav="exports"><i data-lucide="file-down" aria-hidden="true"></i><span>Payroll & Exports</span><strong class="action-count" data-count-for="exports">0</strong></button>
+          <button type="button" data-nav="trash"><i data-lucide="trash-2" aria-hidden="true"></i><span>Trash</span><strong class="action-count" data-count-for="trash">0</strong></button>
+        </nav>
+      </div>
+    </aside>
 
     <main class="content">
       <p class="status-message" id="statusMessage"></p>
-
       <section class="view" data-view="dashboard">
-        <div class="section-header">
+        <div class="dashboard-header">
           <div>
-            <p class="eyebrow">System Quick Stats</p>
-            <h2>Dashboard</h2>
+            <p class="eyebrow">Dashboard</p>
+            <h2>Student Information System</h2>
+            <p class="hero-note">Quickly access scholar records, monitor renewals, and manage payroll from one clear control panel.</p>
           </div>
         </div>
+
         <div class="stats-grid">
-          <div class="card">
+          <div class="stat-card card">
             <p class="stat-label">Total Scholars</p>
             <div class="stat-value" id="totalStudents">0</div>
+            <p class="stat-note">Active scholars in the registry</p>
           </div>
-          <div class="card">
-            <p class="stat-label">Claimed Pending Renewal</p>
+          <div class="stat-card card">
+            <p class="stat-label">Pending Renewals</p>
             <div class="stat-value" id="pendingRenewals">0</div>
+            <p class="stat-note">Scholarship renewals awaiting review</p>
           </div>
-          <div class="card">
-            <p class="stat-label">Claimed</p>
+          <div class="stat-card card">
+            <p class="stat-label">Approved Scholars</p>
             <div class="stat-value" id="claimedStudents">0</div>
+            <p class="stat-note">Students approved this cycle</p>
           </div>
-          <div class="card">
-            <p class="stat-label">Trash</p>
+          <div class="stat-card card">
+            <p class="stat-label">Trash Records</p>
             <div class="stat-value" id="trashCount">0</div>
+            <p class="stat-note">Deleted or archived records</p>
           </div>
+        </div>
+
+        <div class="workflow-area">
+          <div class="workflow-grid">
+            <button type="button" class="workflow-card" data-nav="register">
+              <i data-lucide="user-round-plus" aria-hidden="true"></i>
+              <h3>Student Registry</h3>
+              <p>Register new students and update records with a single tap.</p>
+            </button>
+            <button type="button" class="workflow-card" data-nav="renewal">
+              <i data-lucide="repeat-2" aria-hidden="true"></i>
+              <h3>Academic Renewal</h3>
+              <p>Track requirement submissions and verification status.</p>
+            </button>
+            <button type="button" class="workflow-card" data-nav="records">
+              <i data-lucide="clipboard-list" aria-hidden="true"></i>
+              <h3>Scholarship Listing</h3>
+              <p>Search and filter the full scholar database quickly.</p>
+            </button>
+            <button type="button" class="workflow-card" data-nav="payouts">
+              <i data-lucide="receipt-text" aria-hidden="true"></i>
+              <h3>Payroll Hub</h3>
+              <p>Prepare, verify, and export payroll data easily.</p>
+            </button>
+            <button type="button" class="workflow-card" data-nav="exports">
+              <i data-lucide="file-down" aria-hidden="true"></i>
+              <h3>Reporting & Exports</h3>
+              <p>Generate reports for Excel, PDF, and audit review.</p>
+            </button>
+            <button type="button" class="workflow-card" data-nav="setup">
+              <i data-lucide="sliders-horizontal" aria-hidden="true"></i>
+              <h3>School / Course Setup</h3>
+              <p>Manage barangays, schools, courses, and batches.</p>
+            </button>
+          </div>
+
+          <aside class="alerts-panel">
+            <div class="alert-card">
+              <div class="alert-header">
+                <p class="eyebrow">Current Alerts</p>
+                <h3>Renewal Deadlines</h3>
+              </div>
+              <div class="alert-item">
+                <strong>Audit Flags</strong>
+                <p>15 students missing Enrollment Form for Batch 4.</p>
+              </div>
+              <div class="alert-item">
+                <strong>Priority</strong>
+                <p>Review pending renewals and update payroll records.</p>
+              </div>
+            </div>
+          </aside>
         </div>
       </section>
 
@@ -199,6 +282,7 @@
             <option value="5">Batch 5</option>
             <option value="6">Batch 6</option>
             <option value="7">Batch 7</option>
+            <option value="none">No batch indicated</option>
           </select>
           <select id="renewalYearFilter">
             <option value="">All year levels</option>
@@ -287,27 +371,60 @@
             <option value="5">Batch 5</option>
             <option value="6">Batch 6</option>
             <option value="7">Batch 7</option>
+            <option value="none">No batch indicated</option>
           </select>
         </div>
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Payroll</th>
-                <th>ID</th>
-                <th>Name</th>
-                <th>School</th>
-                <th>Course</th>
-                <th>Year</th>
-                <th>Batch</th>
-                <th>Status</th>
-                <th>Renewal Tracked</th>
-                <th>Prior Payout</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody id="studentRows"></tbody>
-          </table>
+        <div class="table-wrap table-wrap-records">
+          <div class="clusterize">
+            <table class="records-table records-table-head" aria-hidden="true">
+              <colgroup>
+                <col class="col-payroll">
+                <col class="col-id">
+                <col class="col-name">
+                <col class="col-school">
+                <col class="col-course">
+                <col class="col-year">
+                <col class="col-batch">
+                <col class="col-status">
+                <col class="col-renewal">
+                <col class="col-payout">
+                <col class="col-actions">
+              </colgroup>
+              <thead>
+                <tr>
+                  <th>Payroll</th>
+                  <th>ID</th>
+                  <th>Name</th>
+                  <th>School</th>
+                  <th>Course</th>
+                  <th>Year</th>
+                  <th>Batch</th>
+                  <th>Status</th>
+                  <th>Renewal Tracked</th>
+                  <th>Prior Payout</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+            </table>
+            <div id="studentRowsScroll" class="clusterize-scroll">
+              <table class="records-table records-table-body">
+                <colgroup>
+                  <col class="col-payroll">
+                  <col class="col-id">
+                  <col class="col-name">
+                  <col class="col-school">
+                  <col class="col-course">
+                  <col class="col-year">
+                  <col class="col-batch">
+                  <col class="col-status">
+                  <col class="col-renewal">
+                  <col class="col-payout">
+                  <col class="col-actions">
+                </colgroup>
+                <tbody id="studentRows" class="clusterize-content"></tbody>
+              </table>
+            </div>
+          </div>
         </div>
       </section>
 
@@ -318,6 +435,39 @@
             <h2>Barangays, Schools, And Courses</h2>
           </div>
         </div>
+        <form class="panel" id="userManagementForm" data-admin-only hidden>
+          <div class="section-header">
+            <div>
+              <p class="eyebrow">Admin</p>
+              <h2>Create Auth User</h2>
+            </div>
+          </div>
+          <p class="helper-text">Create a Firebase Authentication user and assign either the `admin` or `user` role claim.</p>
+          <div class="form-grid">
+            <div class="field-group">
+              <label for="managedUserEmail">Email</label>
+              <input id="managedUserEmail" name="email" type="email" autocomplete="off" required>
+            </div>
+            <div class="field-group">
+              <label for="managedUserPassword">Temporary Password</label>
+              <input id="managedUserPassword" name="password" type="password" autocomplete="new-password" minlength="6" required>
+            </div>
+            <div class="field-group">
+              <label for="managedUserDisplayName">Display Name</label>
+              <input id="managedUserDisplayName" name="displayName" autocomplete="off">
+            </div>
+            <div class="field-group">
+              <label for="managedUserRole">Role</label>
+              <select id="managedUserRole" name="role" required>
+                <option value="user">User</option>
+                <option value="admin">Admin</option>
+              </select>
+            </div>
+          </div>
+          <div class="actions">
+            <button class="primary" type="submit">Create User</button>
+          </div>
+        </form>
         <form class="panel" id="barangayForm">
           <div class="form-grid">
             <div class="field-group">
@@ -434,6 +584,7 @@
             <option value="5">Batch 5</option>
             <option value="6">Batch 6</option>
             <option value="7">Batch 7</option>
+            <option value="none">No batch indicated</option>
           </select>
         </div>
         <div class="table-wrap">
@@ -502,10 +653,12 @@
               <option value="5">Batch 5</option>
               <option value="6">Batch 6</option>
               <option value="7">Batch 7</option>
+              <option value="none">No batch indicated</option>
             </select>
           </div>
           <div class="actions">
             <button type="button" class="primary" id="exportStudents">Export Payroll Files</button>
+            <button type="button" id="selectAllPayroll">Select All Filtered</button>
             <button type="button" id="clearPayrollSelection">Clear Selection</button>
             <button type="button" id="exportCsv">Export Filtered CSV</button>
           </div>
@@ -548,6 +701,7 @@
             <option value="5">Batch 5</option>
             <option value="6">Batch 6</option>
             <option value="7">Batch 7</option>
+            <option value="none">No batch indicated</option>
           </select>
         </div>
         <div class="table-wrap">
@@ -598,6 +752,7 @@
     <div id="studentDetailsBody"></div>
   </dialog>
 
+  <script src="https://cdn.jsdelivr.net/npm/clusterize.js@1.0.0/clusterize.min.js"></script>
   <script type="module" src="./js/app.js"></script>
 </body>
 </html>

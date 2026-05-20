@@ -1,0 +1,25 @@
+{
+  "name": "sis-next",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start"
+  },
+  "dependencies": {
+    "@tanstack/react-virtual": "^3.13.24",
+    "firebase": "^12.13.0",
+    "firebase-admin": "^13.10.0",
+    "lucide-react": "^1.16.0",
+    "next": "^15.2.4",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.21",
+    "@types/react": "^19.0.12",
+    "@types/react-dom": "^19.0.6",
+    "typescript": "^5.8.3"
+  }
+}

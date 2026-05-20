@@ -1,0 +1,19 @@
+{
+  "name": "sam-static-firebase",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Root static server for the Student Information System Firebase site.",
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "serve": "serve public --listen 4173 --single",
+    "dev": "npm run serve",
+    "dev:next": "npm run dev -w apps/sis-next",
+    "build:next": "npm run build -w apps/sis-next",
+    "start:next": "npm run start -w apps/sis-next"
+  },
+  "devDependencies": {
+    "serve": "^14.2.4"
+  }
+}

@@ -1,5 +1,8 @@
 {
   "projects": {
-    "default": "lgus-sjc-scholarship"
-  }
+    "default": "lgus-sjc-scholarship",
+    "deployment": "lgus-sjc-scholarship"
+  },
+  "targets": {},
+  "etags": {}
 }

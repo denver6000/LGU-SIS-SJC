@@ -16,6 +16,8 @@ const BATCH_OPTIONS_SEED_URL = "/data/batch_options.seed.json";
 const FIRESTORE_BATCH_LIMIT = 450;
 
 let firebaseRuntime = null;
+const ROLE_ADMIN = "admin";
+const ROLE_USER = "user";
 
 function hasFirebaseConfig() {
   return Boolean(
@@ -34,11 +36,30 @@ async function getFirebaseRuntime() {
   const appModule = await import("https://www.gstatic.com/firebasejs/12.13.0/firebase-app.js");
   const firestore = await import("https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js");
   const authModule = await import("https://www.gstatic.com/firebasejs/12.13.0/firebase-auth.js");
+  const functionsModule = await import("https://www.gstatic.com/firebasejs/12.13.0/firebase-functions.js");
   const app = appModule.initializeApp(FIREBASE_CONFIG);
   const db = firestore.getFirestore(app);
   const auth = authModule.getAuth(app);
-  firebaseRuntime = { db, firestore, auth, authModule };
+  const functions = functionsModule.getFunctions(app, "asia-southeast1");
+  firebaseRuntime = { db, firestore, auth, authModule, functions, functionsModule };
   return firebaseRuntime;
+}
+
+function normalizeRoleFromClaims(claims = {}) {
+  if (claims.role === ROLE_ADMIN || claims.admin === true) return ROLE_ADMIN;
+  if (claims.role === ROLE_USER || claims.user === true) return ROLE_USER;
+  return null;
+}
+
+async function callFunction(name, data) {
+  const runtime = await getFirebaseRuntime();
+  if (!runtime) {
+    throw new Error("Firebase Functions requires a valid Firebase configuration.");
+  }
+
+  const callable = runtime.functionsModule.httpsCallable(runtime.functions, name);
+  const result = await callable(data);
+  return result.data;
 }
 
 function readLocal(key) {
@@ -117,7 +138,19 @@ export async function onAuthUserChanged(callback) {
     callback(null);
     return () => {};
   }
-  return runtime.authModule.onAuthStateChanged(runtime.auth, callback);
+  return runtime.authModule.onAuthStateChanged(runtime.auth, async (user) => {
+    if (!user) {
+      callback(null);
+      return;
+    }
+
+    const tokenResult = await user.getIdTokenResult(true);
+    callback({
+      user,
+      claims: tokenResult.claims || {},
+      role: normalizeRoleFromClaims(tokenResult.claims || {})
+    });
+  });
 }
 
 export async function signInUser(email, password) {
@@ -125,13 +158,23 @@ export async function signInUser(email, password) {
   if (!runtime) {
     throw new Error("Firebase Auth requires a valid Firebase configuration.");
   }
-  return runtime.authModule.signInWithEmailAndPassword(runtime.auth, email, password);
+  const credentials = await runtime.authModule.signInWithEmailAndPassword(runtime.auth, email, password);
+  await credentials.user.getIdTokenResult(true);
+  return credentials;
 }
 
 export async function signOutUser() {
   const runtime = await getFirebaseRuntime();
   if (!runtime) return;
   await runtime.authModule.signOut(runtime.auth);
+}
+
+export async function createManagedUser(input) {
+  return callFunction("createManagedUser", input);
+}
+
+export async function removeStudentByAdmin(studentId) {
+  return callFunction("removeStudent", { studentId });
 }
 
 export async function getStudents() {
@@ -293,6 +336,12 @@ export async function moveStudentToTrash(studentId) {
   const trash = await getTrash();
   const student = students.find((item) => item.student_id === studentId);
   if (!student) return null;
+
+  const runtime = await getFirebaseRuntime();
+  if (runtime) {
+    await removeStudentByAdmin(studentId);
+    return { ...student, deleted_at: new Date().toISOString() };
+  }
 
   const trashed = { ...student, deleted_at: new Date().toISOString() };
   const remaining = students.filter((item) => item.student_id !== studentId);

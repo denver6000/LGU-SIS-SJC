@@ -1,0 +1,22 @@
+{
+  "name": "migration",
+  "version": "1.0.0",
+  "description": "Firebase admin migration and maintenance CLI",
+  "main": "index.js",
+  "bin": {
+    "add_admin_custom_claims": "./bin/add_admin_custom_claims.js",
+    "remove_admin_custom_claims": "./bin/remove_admin_custom_claims.js",
+    "set_custom_claim": "./bin/set_custom_claim.js"
+  },
+  "scripts": {
+    "add_admin_custom_claims": "node ./bin/add_admin_custom_claims.js",
+    "remove_admin_custom_claims": "node ./bin/remove_admin_custom_claims.js",
+    "set_custom_claim": "node ./bin/set_custom_claim.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "firebase-admin": "^13.6.0"
+  }
+}

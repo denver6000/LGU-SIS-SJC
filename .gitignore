@@ -1,6 +1,7 @@
 # Firebase / local emulator state
 .firebase/
 firebase-debug.log*
+deploy-debug.log*
 firestore-debug.log*
 ui-debug.log*
 database-debug.log*
@@ -8,6 +9,11 @@ storage-debug.log*
 
 # Dependencies and caches
 node_modules/
+.next/
+apps/*/.next/
+apps/*/next-dev.log
+.vercel/
+.turbo/
 __pycache__/
 *.py[cod]
 .pytest_cache/
@@ -16,6 +22,7 @@ __pycache__/
 .env
 .env.*
 !.env.example
+!apps/*/.env.example
 .secrets/
 secrets/
 serviceAccount*.json
@@ -40,3 +47,6 @@ BATCH*.xlsx
 public/data/batch_options.seed.json
 public/data/*.import.json
 public/data/*.migration.json
+service-account/
+migration/node_modules/
+migration/service-account/
