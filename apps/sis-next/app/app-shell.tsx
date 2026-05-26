@@ -18,22 +18,8 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import type React from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "./auth-provider";
-
-type Student = {
-  student_id: string;
-  full_name: string;
-  school_address?: string;
-  school_course?: string;
-  year_level?: string;
-  batch?: string;
-  phone_number?: string;
-  status?: string;
-  claimed?: boolean;
-  renewed?: boolean;
-  payrolled?: boolean;
-  created_at?: string;
-  claimed_at?: string;
-};
+import { exportPayrollFiles } from "./lib/payroll-export";
+import { getStudents, getTrash, type Student } from "./lib/student-store";
 
 type ViewName = "dashboard" | "register" | "renewal" | "records" | "payouts" | "import" | "setup" | "exports" | "trash";
 type Column<T> = {
@@ -43,9 +29,9 @@ type Column<T> = {
   render: (row: T) => React.ReactNode;
 };
 
-const navItems: Array<{ view: ViewName; label: string; icon: React.ComponentType<{ size?: number }> }> = [
+const navItems: Array<{ view: ViewName; label: string; icon: React.ComponentType<{ size?: number }>; adminOnly?: boolean }> = [
   { view: "dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { view: "register", label: "Student Registry", icon: UserRoundPlus },
+  { view: "register", label: "Student Registry", icon: UserRoundPlus, adminOnly: true },
   { view: "renewal", label: "Renewal Tracking", icon: Repeat2 },
   { view: "records", label: "Scholarship Listing", icon: ClipboardList },
   { view: "payouts", label: "Payout Records", icon: ReceiptText },
@@ -54,6 +40,10 @@ const navItems: Array<{ view: ViewName; label: string; icon: React.ComponentType
   { view: "exports", label: "Payroll & Exports", icon: FileDown },
   { view: "trash", label: "Trash", icon: Trash2 }
 ];
+
+function isAdminUser(user: ReturnType<typeof useAuth>["user"]) {
+  return user?.claims.admin === true || user?.claims.role === "admin" || user?.role === "admin";
+}
 
 function initials(name: string) {
   return name
@@ -71,12 +61,11 @@ export function AppShell() {
   const [students, setStudents] = useState<Student[]>([]);
   const [trash, setTrash] = useState<Student[]>([]);
   const [selectedPayrollIds, setSelectedPayrollIds] = useState<Set<string>>(() => new Set());
+  const isAdmin = isAdminUser(user);
+  const visibleNavItems = navItems.filter((item) => !item.adminOnly || isAdmin);
 
   useEffect(() => {
-    Promise.all([
-      fetch("/data/student_data.seed.json").then((response) => response.json()).catch(() => []),
-      fetch("/data/trash_data.seed.json").then((response) => response.json()).catch(() => [])
-    ]).then(([studentRows, trashRows]) => {
+    Promise.all([getStudents(), getTrash()]).then(([studentRows, trashRows]) => {
       setStudents(studentRows);
       setTrash(trashRows);
     });
@@ -90,9 +79,26 @@ export function AppShell() {
     });
   }, [students]);
 
+  useEffect(() => {
+    if (activeView === "register" && !isAdmin) {
+      setActiveView("dashboard");
+    }
+  }, [activeView, isAdmin]);
+
   function navigate(view: ViewName) {
+    if (view === "register" && !isAdmin) return;
     setActiveView(view);
     setSidebarOpen(false);
+  }
+
+  function removeStudent(student: Student) {
+    if (!isAdmin) return;
+
+    setStudents((current) => current.filter((row) => row.student_id !== student.student_id));
+    setTrash((current) => {
+      if (current.some((row) => row.student_id === student.student_id)) return current;
+      return [student, ...current];
+    });
   }
 
   return (
@@ -140,7 +146,7 @@ export function AppShell() {
             </div>
 
             <nav className="action-nav" aria-label="Primary actions">
-              {navItems.map((item) => {
+              {visibleNavItems.map((item) => {
                 const Icon = item.icon;
                 return (
                   <button
@@ -164,6 +170,8 @@ export function AppShell() {
             view={activeView}
             students={students}
             trash={trash}
+            isAdmin={isAdmin}
+            onRemoveStudent={removeStudent}
             selectedPayrollIds={selectedPayrollIds}
             setSelectedPayrollIds={setSelectedPayrollIds}
           />
@@ -179,19 +187,147 @@ function countForView(view: ViewName, students: Student[], trash: Student[]) {
   return students.length;
 }
 
+function parseSortableNumber(value?: string) {
+  const match = value?.match(/\d+/);
+  return match ? Number(match[0]) : Number.MAX_SAFE_INTEGER;
+}
+
+function getLastName(fullName: string) {
+  const [beforeComma] = fullName.split(",");
+  const parts = beforeComma.trim().split(/\s+/).filter(Boolean);
+  return (parts[parts.length - 1] || fullName).toLocaleLowerCase();
+}
+
+function compareBatchValues(left?: string, right?: string) {
+  const leftNumber = parseSortableNumber(left);
+  const rightNumber = parseSortableNumber(right);
+  if (leftNumber !== rightNumber) return leftNumber - rightNumber;
+  return (left || "").localeCompare(right || "", undefined, { numeric: true, sensitivity: "base" });
+}
+
+function comparePayrollStudents(left: Student, right: Student) {
+  const yearDiff = parseSortableNumber(left.year_level) - parseSortableNumber(right.year_level);
+  if (yearDiff !== 0) return yearDiff;
+
+  const lastNameDiff = getLastName(left.full_name).localeCompare(getLastName(right.full_name), undefined, {
+    numeric: true,
+    sensitivity: "base"
+  });
+  if (lastNameDiff !== 0) return lastNameDiff;
+
+  return left.full_name.localeCompare(right.full_name, undefined, { numeric: true, sensitivity: "base" });
+}
+
+function filterStudentRecords(
+  students: Student[],
+  filters: { search: string; status: string; batch: string }
+) {
+  const search = filters.search.trim().toLocaleLowerCase();
+
+  return students.filter((student) => {
+    const haystack = [
+      student.student_id,
+      student.full_name,
+      student.school_course,
+      student.school_address,
+      student.year_level,
+      student.batch,
+      student.status
+    ].join(" ").toLocaleLowerCase();
+
+    if (search && !haystack.includes(search)) return false;
+    if (filters.batch !== "all" && student.batch !== filters.batch) return false;
+    if (filters.status === "renewed" && !student.renewed) return false;
+    if (filters.status === "unrenewed" && student.renewed) return false;
+    if (filters.status === "claimed" && !student.claimed) return false;
+    if (filters.status === "unclaimed" && student.claimed) return false;
+    if (filters.status === "payrolled" && !student.payrolled) return false;
+    if (filters.status === "unpayrolled" && student.payrolled) return false;
+    if (filters.status === "complete" && completionStatus(student) !== "Complete") return false;
+    if (filters.status === "incomplete" && completionStatus(student) === "Complete") return false;
+    return true;
+  });
+}
+
+function StudentFilterPanel({
+  search,
+  status,
+  batch,
+  batchOptions,
+  onSearchChange,
+  onStatusChange,
+  onBatchChange,
+  compact = false
+}: {
+  search: string;
+  status: string;
+  batch: string;
+  batchOptions: string[];
+  onSearchChange: (value: string) => void;
+  onStatusChange: (value: string) => void;
+  onBatchChange: (value: string) => void;
+  compact?: boolean;
+}) {
+  return (
+    <div className={compact ? "filter-panel compact" : "filter-panel"}>
+      <label>
+        <span>Search</span>
+        <input
+          type="search"
+          value={search}
+          placeholder="Name, ID, school, course, batch"
+          onChange={(event) => onSearchChange(event.currentTarget.value)}
+        />
+      </label>
+      <label>
+        <span>Status</span>
+        <select value={status} onChange={(event) => onStatusChange(event.currentTarget.value)}>
+          <option value="all">All records</option>
+          <option value="complete">Complete documents</option>
+          <option value="incomplete">Incomplete documents</option>
+          <option value="claimed">Claimed</option>
+          <option value="unclaimed">Unclaimed</option>
+          <option value="renewed">Renewed</option>
+          <option value="unrenewed">Unrenewed</option>
+          <option value="payrolled">Payroll prepared</option>
+          <option value="unpayrolled">Payroll not prepared</option>
+        </select>
+      </label>
+      <label>
+        <span>Batch</span>
+        <select value={batch} onChange={(event) => onBatchChange(event.currentTarget.value)}>
+          <option value="all">All batches</option>
+          {batchOptions.map((option) => (
+            <option key={option} value={option}>{option}</option>
+          ))}
+        </select>
+      </label>
+    </div>
+  );
+}
+
 function ViewContent({
   view,
   students,
   trash,
+  isAdmin,
+  onRemoveStudent,
   selectedPayrollIds,
   setSelectedPayrollIds
 }: {
   view: ViewName;
   students: Student[];
   trash: Student[];
+  isAdmin: boolean;
+  onRemoveStudent: (student: Student) => void;
   selectedPayrollIds: Set<string>;
   setSelectedPayrollIds: React.Dispatch<React.SetStateAction<Set<string>>>;
 }) {
+  const [studentSearch, setStudentSearch] = useState("");
+  const [studentStatusFilter, setStudentStatusFilter] = useState("all");
+  const [studentBatchFilter, setStudentBatchFilter] = useState("all");
+  const [isExportingPayroll, setIsExportingPayroll] = useState(false);
+  const [payrollExportMessage, setPayrollExportMessage] = useState("");
   const studentColumns = useMemo<Column<Student>[]>(() => [
     { key: "id", header: "ID", width: "120px", render: (student) => student.student_id },
     {
@@ -213,14 +349,44 @@ function ViewContent({
   ], []);
 
   const renewalRows = useMemo(() => students.filter((student) => student.claimed), [students]);
-  const payrollRows = students;
+  const batchOptions = useMemo(() => {
+    const batches = new Set(students.flatMap((student) => student.batch ? [student.batch] : []));
+    return [...batches].sort(compareBatchValues);
+  }, [students]);
+  const filteredStudents = useMemo(() => {
+    return filterStudentRecords(students, {
+      search: studentSearch,
+      status: studentStatusFilter,
+      batch: studentBatchFilter
+    });
+  }, [students, studentSearch, studentStatusFilter, studentBatchFilter]);
+  const payrollRows = useMemo(() => {
+    return filteredStudents.slice().sort(comparePayrollStudents);
+  }, [filteredStudents]);
+  const selectedFilteredPayrollRows = useMemo(() => {
+    return payrollRows.filter((student) => selectedPayrollIds.has(student.student_id));
+  }, [payrollRows, selectedPayrollIds]);
   const payoutRows = useMemo(() => students.filter((student) => student.claimed || student.payrolled), [students]);
+  const recordColumns = isAdmin
+    ? [
+      ...studentColumns,
+      {
+        key: "actions",
+        header: "Actions",
+        width: "140px",
+        render: (student: Student) => (
+          <button type="button" className="danger-link" onClick={() => onRemoveStudent(student)}>
+            Remove
+          </button>
+        )
+      }
+    ]
+    : studentColumns;
 
   function togglePayrollSelection(student: Student, isChecked: boolean) {
     setSelectedPayrollIds((current) => {
       const next = new Set(current);
       if (isChecked) {
-        if (next.size >= 15 && !next.has(student.student_id)) return current;
         next.add(student.student_id);
       } else {
         next.delete(student.student_id);
@@ -233,11 +399,24 @@ function ViewContent({
     setSelectedPayrollIds((current) => {
       const next = new Set(current);
       for (const student of payrollRows) {
-        if (next.size >= 15) break;
         next.add(student.student_id);
       }
       return next;
     });
+  }
+
+  async function exportSelectedPayrollRows() {
+    setIsExportingPayroll(true);
+    setPayrollExportMessage("");
+
+    try {
+      const groupCount = await exportPayrollFiles(selectedFilteredPayrollRows);
+      setPayrollExportMessage(`Exported ${selectedFilteredPayrollRows.length} students into ${groupCount} payroll group${groupCount === 1 ? "" : "s"}.`);
+    } catch (error) {
+      setPayrollExportMessage(error instanceof Error ? error.message : "Unable to export payroll files.");
+    } finally {
+      setIsExportingPayroll(false);
+    }
   }
 
   if (view === "dashboard") {
@@ -266,7 +445,16 @@ function ViewContent({
             <h2>Student Records</h2>
           </div>
         </div>
-        <VirtualTable columns={studentColumns} rows={students} getRowKey={(student) => student.student_id} />
+        <StudentFilterPanel
+          search={studentSearch}
+          status={studentStatusFilter}
+          batch={studentBatchFilter}
+          batchOptions={batchOptions}
+          onSearchChange={setStudentSearch}
+          onStatusChange={setStudentStatusFilter}
+          onBatchChange={setStudentBatchFilter}
+        />
+        <VirtualTable columns={recordColumns} rows={filteredStudents} getRowKey={(student) => student.student_id} />
       </section>
     );
   }
@@ -302,12 +490,30 @@ function ViewContent({
           </div>
         </div>
         <div className="panel payroll-control-panel">
-          <p className="selection-summary">{selectedPayrollIds.size} of 15 students selected.</p>
+          <div>
+            <p className="selection-summary">{selectedFilteredPayrollRows.length} filtered students selected.</p>
+            <p className="muted-copy">
+              Reflects the Student Records filters. Sorted by year level, then last name. Exports are grouped into 15 students per Word/Excel set.
+            </p>
+          </div>
+          <StudentFilterPanel
+            compact
+            search={studentSearch}
+            status={studentStatusFilter}
+            batch={studentBatchFilter}
+            batchOptions={batchOptions}
+            onSearchChange={setStudentSearch}
+            onStatusChange={setStudentStatusFilter}
+            onBatchChange={setStudentBatchFilter}
+          />
           <div className="actions">
-            <button type="button" className="primary">Export Payroll Files</button>
+            <button type="button" className="primary" disabled={isExportingPayroll} onClick={exportSelectedPayrollRows}>
+              {isExportingPayroll ? "Exporting..." : "Export Payroll Files"}
+            </button>
             <button type="button" onClick={selectAllPayrollRows}>Select All Filtered</button>
             <button type="button" onClick={() => setSelectedPayrollIds(new Set())}>Clear Selection</button>
           </div>
+          {payrollExportMessage ? <p className="export-feedback">{payrollExportMessage}</p> : null}
         </div>
         <VirtualTable
           columns={[

@@ -18,6 +18,28 @@ const FIRESTORE_BATCH_LIMIT = 450;
 let firebaseRuntime = null;
 const ROLE_ADMIN = "admin";
 const ROLE_USER = "user";
+const DEBUG_PREFIX = "[SamAuthDebug]";
+
+function debugLog(label, payload) {
+  try {
+    if (payload === undefined) {
+      console.info(`${DEBUG_PREFIX} ${label}`);
+      return;
+    }
+    console.info(`${DEBUG_PREFIX} ${label}`, payload);
+  } catch {
+    console.info(`${DEBUG_PREFIX} ${label}`);
+  }
+}
+
+function debugError(label, error) {
+  console.error(`${DEBUG_PREFIX} ${label}`, {
+    code: typeof error?.code === "string" ? error.code : "",
+    message: typeof error?.message === "string" ? error.message : String(error),
+    details: typeof error?.details === "string" ? error.details : "",
+    customMessage: typeof error?.customData?.message === "string" ? error.customData.message : ""
+  });
+}
 
 function hasFirebaseConfig() {
   return Boolean(
@@ -42,6 +64,11 @@ async function getFirebaseRuntime() {
   const auth = authModule.getAuth(app);
   const functions = functionsModule.getFunctions(app, "asia-southeast1");
   firebaseRuntime = { db, firestore, auth, authModule, functions, functionsModule };
+  debugLog("firebase-runtime-ready", {
+    projectId: FIREBASE_CONFIG.projectId,
+    authDomain: FIREBASE_CONFIG.authDomain,
+    functionsRegion: "asia-southeast1"
+  });
   return firebaseRuntime;
 }
 
@@ -51,15 +78,98 @@ function normalizeRoleFromClaims(claims = {}) {
   return null;
 }
 
+function normalizeBackendError(error, sourceLabel = "Firebase") {
+  const details = typeof error?.details === "string" ? error.details.trim() : "";
+  const message = typeof error?.message === "string" ? error.message.trim() : "";
+  const code = typeof error?.code === "string" ? error.code.trim() : "";
+  const customMessage = typeof error?.customData?.message === "string"
+    ? error.customData.message.trim()
+    : "";
+
+  const preferredMessage = details || customMessage || message;
+  if (preferredMessage && preferredMessage.toLowerCase() !== "internal") {
+    return new Error(preferredMessage);
+  }
+
+  if (code.includes("permission-denied")) {
+    return new Error("You do not have permission to perform this action.");
+  }
+  if (code.includes("unauthenticated")) {
+    return new Error("You must sign in again before performing this action.");
+  }
+  if (code.includes("not-found")) {
+    if (sourceLabel === "Firebase Functions") {
+      return new Error("The requested Firebase function is not available. Deploy the latest functions and try again.");
+    }
+    return new Error("The requested Firestore record could not be found.");
+  }
+  if (code.includes("unavailable")) {
+    return new Error(`${sourceLabel} is currently unavailable. Check your network connection or try again shortly.`);
+  }
+  if (code.includes("failed-precondition")) {
+    return new Error("This action could not be completed because the required Firebase state is not ready.");
+  }
+  if (code.includes("already-exists")) {
+    return new Error("That record already exists.");
+  }
+  if (code.includes("resource-exhausted")) {
+    return new Error(`${sourceLabel} is currently rate limited. Try again shortly.`);
+  }
+
+  if (sourceLabel === "Firebase Functions") {
+    return new Error("Firebase Functions returned an internal error. If you recently changed functions, deploy them and try again.");
+  }
+
+  return new Error(`${sourceLabel} returned an unexpected error. Please try again.`);
+}
+
 async function callFunction(name, data) {
   const runtime = await getFirebaseRuntime();
   if (!runtime) {
     throw new Error("Firebase Functions requires a valid Firebase configuration.");
   }
 
-  const callable = runtime.functionsModule.httpsCallable(runtime.functions, name);
-  const result = await callable(data);
-  return result.data;
+  try {
+    const currentUser = runtime.auth.currentUser;
+    let tokenPreview = null;
+    let tokenError = null;
+    if (currentUser) {
+      try {
+        const tokenResult = await currentUser.getIdTokenResult();
+        tokenPreview = {
+          uid: currentUser.uid,
+          email: currentUser.email || "",
+          issuedAtTime: tokenResult.issuedAtTime || "",
+          expirationTime: tokenResult.expirationTime || "",
+          claimsRole: tokenResult.claims?.role || null,
+          admin: tokenResult.claims?.admin === true,
+          user: tokenResult.claims?.user === true
+        };
+      } catch (error) {
+        tokenError = {
+          message: typeof error?.message === "string" ? error.message : String(error)
+        };
+      }
+    }
+    debugLog(`callable-start:${name}`, {
+      hasCurrentUser: Boolean(currentUser),
+      uid: currentUser?.uid || "",
+      email: currentUser?.email || "",
+      tokenPreview,
+      tokenError,
+      payloadKeys: data && typeof data === "object" ? Object.keys(data) : []
+    });
+
+    const callable = runtime.functionsModule.httpsCallable(runtime.functions, name);
+    const result = await callable(data);
+    debugLog(`callable-success:${name}`, {
+      resultKeys: result?.data && typeof result.data === "object" ? Object.keys(result.data) : []
+    });
+    return result.data;
+  } catch (error) {
+    debugError(`callable-failure:${name}`, error);
+    throw normalizeBackendError(error, "Firebase Functions");
+  }
 }
 
 function readLocal(key) {
@@ -91,8 +201,12 @@ async function getCollection(collectionName, localKey) {
   if (!runtime) return readLocal(localKey);
 
   const { collection, getDocs } = runtime.firestore;
-  const snapshot = await getDocs(collection(runtime.db, collectionName));
-  return snapshot.docs.map((docSnap) => ({ ...docSnap.data(), _docId: docSnap.id }));
+  try {
+    const snapshot = await getDocs(collection(runtime.db, collectionName));
+    return snapshot.docs.map((docSnap) => ({ ...docSnap.data(), _docId: docSnap.id }));
+  } catch (error) {
+    throw normalizeBackendError(error, "Firestore");
+  }
 }
 
 async function setDocument(collectionName, id, data) {
@@ -100,8 +214,12 @@ async function setDocument(collectionName, id, data) {
   if (!runtime) return false;
 
   const { doc, setDoc } = runtime.firestore;
-  await setDoc(doc(runtime.db, collectionName, id), data);
-  return true;
+  try {
+    await setDoc(doc(runtime.db, collectionName, id), data);
+    return true;
+  } catch (error) {
+    throw normalizeBackendError(error, "Firestore");
+  }
 }
 
 async function setDocuments(collectionName, records, getId) {
@@ -109,14 +227,18 @@ async function setDocuments(collectionName, records, getId) {
   if (!runtime) return false;
 
   const { doc, writeBatch } = runtime.firestore;
-  for (let index = 0; index < records.length; index += FIRESTORE_BATCH_LIMIT) {
-    const batch = writeBatch(runtime.db);
-    records.slice(index, index + FIRESTORE_BATCH_LIMIT).forEach((record) => {
-      batch.set(doc(runtime.db, collectionName, getId(record)), record);
-    });
-    await batch.commit();
+  try {
+    for (let index = 0; index < records.length; index += FIRESTORE_BATCH_LIMIT) {
+      const batch = writeBatch(runtime.db);
+      records.slice(index, index + FIRESTORE_BATCH_LIMIT).forEach((record) => {
+        batch.set(doc(runtime.db, collectionName, getId(record)), record);
+      });
+      await batch.commit();
+    }
+    return true;
+  } catch (error) {
+    throw normalizeBackendError(error, "Firestore");
   }
-  return true;
 }
 
 async function deleteDocument(collectionName, id) {
@@ -124,8 +246,12 @@ async function deleteDocument(collectionName, id) {
   if (!runtime) return false;
 
   const { deleteDoc, doc } = runtime.firestore;
-  await deleteDoc(doc(runtime.db, collectionName, id));
-  return true;
+  try {
+    await deleteDoc(doc(runtime.db, collectionName, id));
+    return true;
+  } catch (error) {
+    throw normalizeBackendError(error, "Firestore");
+  }
 }
 
 export function storageMode() {
@@ -135,21 +261,39 @@ export function storageMode() {
 export async function onAuthUserChanged(callback) {
   const runtime = await getFirebaseRuntime();
   if (!runtime) {
+    debugLog("auth-listener-local-mode");
     callback(null);
     return () => {};
   }
   return runtime.authModule.onAuthStateChanged(runtime.auth, async (user) => {
     if (!user) {
+      debugLog("auth-state-changed", { signedIn: false });
       callback(null);
       return;
     }
 
-    const tokenResult = await user.getIdTokenResult(true);
-    callback({
-      user,
-      claims: tokenResult.claims || {},
-      role: normalizeRoleFromClaims(tokenResult.claims || {})
-    });
+    try {
+      const tokenResult = await user.getIdTokenResult(true);
+      debugLog("auth-state-changed", {
+        signedIn: true,
+        uid: user.uid,
+        email: user.email || "",
+        role: normalizeRoleFromClaims(tokenResult.claims || {}),
+        claimsRole: tokenResult.claims?.role || null,
+        admin: tokenResult.claims?.admin === true,
+        user: tokenResult.claims?.user === true,
+        issuedAtTime: tokenResult.issuedAtTime || "",
+        expirationTime: tokenResult.expirationTime || ""
+      });
+      callback({
+        user,
+        claims: tokenResult.claims || {},
+        role: normalizeRoleFromClaims(tokenResult.claims || {})
+      });
+    } catch (error) {
+      debugError("auth-state-token-failure", error);
+      throw normalizeBackendError(error, "Firebase Auth");
+    }
   });
 }
 
@@ -158,23 +302,58 @@ export async function signInUser(email, password) {
   if (!runtime) {
     throw new Error("Firebase Auth requires a valid Firebase configuration.");
   }
-  const credentials = await runtime.authModule.signInWithEmailAndPassword(runtime.auth, email, password);
-  await credentials.user.getIdTokenResult(true);
-  return credentials;
+  try {
+    debugLog("sign-in-start", { email });
+    const credentials = await runtime.authModule.signInWithEmailAndPassword(runtime.auth, email, password);
+    const tokenResult = await credentials.user.getIdTokenResult(true);
+    debugLog("sign-in-success", {
+      uid: credentials.user.uid,
+      email: credentials.user.email || "",
+      role: normalizeRoleFromClaims(tokenResult.claims || {}),
+      claimsRole: tokenResult.claims?.role || null,
+      admin: tokenResult.claims?.admin === true,
+      user: tokenResult.claims?.user === true
+    });
+    return credentials;
+  } catch (error) {
+    debugError("sign-in-failure", error);
+    throw normalizeBackendError(error, "Firebase Auth");
+  }
 }
 
 export async function signOutUser() {
   const runtime = await getFirebaseRuntime();
   if (!runtime) return;
-  await runtime.authModule.signOut(runtime.auth);
+  try {
+    debugLog("sign-out-start", {
+      uid: runtime.auth.currentUser?.uid || "",
+      email: runtime.auth.currentUser?.email || ""
+    });
+    await runtime.authModule.signOut(runtime.auth);
+    debugLog("sign-out-success");
+  } catch (error) {
+    debugError("sign-out-failure", error);
+    throw normalizeBackendError(error, "Firebase Auth");
+  }
 }
 
 export async function createManagedUser(input) {
   return callFunction("createManagedUser", input);
 }
 
-export async function removeStudentByAdmin(studentId) {
-  return callFunction("removeStudent", { studentId });
+export async function listManagedUsers() {
+  const runtime = await getFirebaseRuntime();
+  if (!runtime) return [];
+  const result = await callFunction("listManagedUsers");
+  return Array.isArray(result?.users) ? result.users : [];
+}
+
+export async function deleteManagedUser(uid) {
+  return callFunction("deleteManagedUser", { uid });
+}
+
+export async function updateManagedUser(input) {
+  return callFunction("updateManagedUser", input);
 }
 
 export async function getStudents() {
@@ -307,6 +486,12 @@ export async function saveStudent(input) {
     created_at: input.created_at || new Date().toISOString()
   };
 
+  const runtime = await getFirebaseRuntime();
+  if (runtime) {
+    const result = await callFunction("saveStudentByAdmin", { student });
+    return result.student;
+  }
+
   const wroteRemote = await setDocument(COLLECTIONS.students, student.student_id, student);
   if (!wroteRemote) {
     const existingIndex = students.findIndex((item) => item.student_id === student.student_id);
@@ -326,6 +511,12 @@ export async function updateStudent(studentId, patch) {
   const updated = nextStudents.find((student) => student.student_id === studentId);
   if (!updated) return null;
 
+  const runtime = await getFirebaseRuntime();
+  if (runtime) {
+    const result = await callFunction("updateStudentByAdmin", { studentId, student: patch });
+    return result.student;
+  }
+
   const wroteRemote = await setDocument(COLLECTIONS.students, studentId, updated);
   if (!wroteRemote) writeLocal(LOCAL_KEYS.students, nextStudents);
   return updated;
@@ -337,14 +528,14 @@ export async function moveStudentToTrash(studentId) {
   const student = students.find((item) => item.student_id === studentId);
   if (!student) return null;
 
-  const runtime = await getFirebaseRuntime();
-  if (runtime) {
-    await removeStudentByAdmin(studentId);
-    return { ...student, deleted_at: new Date().toISOString() };
-  }
-
   const trashed = { ...student, deleted_at: new Date().toISOString() };
   const remaining = students.filter((item) => item.student_id !== studentId);
+  const runtime = await getFirebaseRuntime();
+  if (runtime) {
+    await callFunction("moveStudentToTrashByAdmin", { studentId });
+    return trashed;
+  }
+
   const removedRemote = await deleteDocument(COLLECTIONS.students, studentId);
   const wroteTrashRemote = await setDocument(COLLECTIONS.trash, studentId, trashed);
 
@@ -370,6 +561,12 @@ export async function restoreStudent(studentId) {
   delete restored.deleted_at;
   const nextTrash = trash.filter((item) => item.student_id !== studentId);
 
+  const runtime = await getFirebaseRuntime();
+  if (runtime) {
+    await callFunction("restoreStudentByAdmin", { studentId });
+    return restored;
+  }
+
   const wroteStudentRemote = await setDocument(COLLECTIONS.students, studentId, restored);
   const removedTrashRemote = await deleteDocument(COLLECTIONS.trash, studentId);
 
@@ -386,6 +583,11 @@ export async function restoreStudent(studentId) {
 
 export async function deleteTrashStudent(studentId) {
   const trash = await getTrash();
+  const runtime = await getFirebaseRuntime();
+  if (runtime) {
+    await callFunction("deleteTrashStudentByAdmin", { studentId });
+    return true;
+  }
   const removedRemote = await deleteDocument(COLLECTIONS.trash, studentId);
   if (!removedRemote) writeLocal(LOCAL_KEYS.trash, trash.filter((item) => item.student_id !== studentId));
   return true;

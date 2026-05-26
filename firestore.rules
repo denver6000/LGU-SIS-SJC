@@ -26,12 +26,12 @@ service cloud.firestore {
 
     match /students/{studentId} {
       allow read: if isAppUser();
-      allow create, update: if isAppUser();
-      allow delete: if false;
+      allow create, update, delete: if false;
     }
 
     match /trash/{studentId} {
-      allow read, write: if isAdmin();
+      allow read: if isAdmin();
+      allow write: if false;
     }
 
     match /payoutRecords/{recordId} {

@@ -1,17 +1,4 @@
 {
-  "apphosting": {
-    "backendId": "sis-next",
-    "rootDir": "apps/sis-next",
-    "ignore": [
-      "node_modules",
-      ".next",
-      ".git",
-      "next-dev.log",
-      ".env.local",
-      "firebase-debug.log",
-      "firebase-debug.*.log"
-    ]
-  },
   "hosting": {
     "public": "public",
     "ignore": [

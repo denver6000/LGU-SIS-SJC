@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { FormEvent, useState } from "react";
 import { signInWithEmailAndPassword } from "firebase/auth";
+import { GraduationCap, LockKeyhole, Mail } from "lucide-react";
 import { firebaseAuth } from "../lib/firebase-client";
 import { useAuth } from "../auth-provider";
 
@@ -13,7 +14,8 @@ export default function LoginPage() {
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const form = new FormData(event.currentTarget);
+    const formElement = event.currentTarget;
+    const form = new FormData(formElement);
     const email = String(form.get("email") || "").trim();
     const password = String(form.get("password") || "");
 
@@ -43,7 +45,7 @@ export default function LoginPage() {
 
       await refreshSession();
       setMessage("Signed in. Continue when you are ready.");
-      event.currentTarget.reset();
+      formElement.reset();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Sign in failed.");
     } finally {
@@ -53,35 +55,43 @@ export default function LoginPage() {
 
   return (
     <main className="login-page">
-      <section className="auth-view" aria-labelledby="authTitle">
-        <div className="brand auth-brand">
-          <div className="brand-mark">SJ</div>
-          <div>
-            <p>San Jose City Educational Assistance</p>
-            <h1>Student Information System</h1>
+      <section className="login-shell" aria-labelledby="authTitle">
+        <form className="login-form" onSubmit={handleSubmit}>
+          <div className="login-brand">
+            <div className="login-icon" aria-hidden="true">
+              <GraduationCap size={30} />
+            </div>
+            <div>
+              <p>San Jose LGU</p>
+              <h1>Scholarship Management System</h1>
+            </div>
           </div>
-        </div>
 
-        <form className="auth-panel" onSubmit={handleSubmit}>
           <div>
-            <p className="eyebrow">Secure Access</p>
-            <h2 id="authTitle">Sign In</h2>
+            <h2 id="authTitle">Login</h2>
+            <p className="login-subtitle">Enter your account details to continue.</p>
           </div>
+
           <div className="field-group">
-            <label htmlFor="loginEmail">Email</label>
-            <input id="loginEmail" name="email" type="email" autoComplete="email" required />
+            <label htmlFor="loginEmail">Email address</label>
+            <div className="login-input">
+              <Mail size={20} aria-hidden="true" />
+              <input id="loginEmail" name="email" type="email" autoComplete="email" placeholder="Enter email" required />
+            </div>
           </div>
           <div className="field-group">
             <label htmlFor="loginPassword">Password</label>
-            <input id="loginPassword" name="password" type="password" autoComplete="current-password" required />
+            <div className="login-input">
+              <LockKeyhole size={20} aria-hidden="true" />
+              <input id="loginPassword" name="password" type="password" autoComplete="current-password" placeholder="Password" required />
+            </div>
           </div>
-          <p className="auth-note">The backend creates an HttpOnly Firebase session after your client sign-in succeeds.</p>
-          <p className="auth-message" aria-live="polite">{message}</p>
-          <div className="actions auth-actions">
+          <p className="login-message" aria-live="polite">{message}</p>
+          <div className="login-actions">
             <button type="submit" className="primary" disabled={isBusy}>
               {isBusy ? "Signing In..." : "Sign In"}
             </button>
-            <Link className="auth-link-button" href="/">
+            <Link href="/">
               Continue to App
             </Link>
           </div>

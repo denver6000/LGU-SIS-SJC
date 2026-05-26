@@ -35,7 +35,7 @@ google-application-credentials*.json
 # Generated/local data artifacts
 outputs/
 *.local.json
-
+/emulator-data
 # Internal import/migration tooling
 scripts/import_*.py
 scripts/*_import.py

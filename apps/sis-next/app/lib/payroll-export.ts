@@ -1,29 +1,26 @@
-const STUDENT_EXPORT_HEADERS = [
-  "Student ID",
-  "Full Name",
-  "Student Number",
-  "Barangay",
-  "Address",
-  "School",
-  "Phone",
-  "Course",
-  "Year Level",
-  "Batch",
-  "Status",
-  "Renewed",
-  "Claimed"
-];
+"use client";
 
-const PAYROLL_EXPORT_HEADERS = [
-  "Student ID",
-  "Full Name",
-  "Student Number",
-  "Course",
-  "Payroll Notes"
-];
+import Docxtemplater from "docxtemplater";
+import PizZip from "pizzip";
 
-const PAYROLL_WORD_TEMPLATE_URL = "./templates/PAYROLL_WORD_TEMPLATE.docx";
-const PAYROLL_EXCEL_TEMPLATE_URL = "./templates/PAYROLL_TEMPLATE.xlsx";
+type PayrollStudent = {
+  student_id?: string;
+  full_name?: string;
+  student_number?: string;
+  barangay?: string;
+  address?: string;
+  phone_number?: string;
+  school_address?: string;
+  school_course?: string;
+  year_level?: string;
+  batch?: string;
+  status?: string;
+  renewed?: boolean;
+  claimed?: boolean;
+};
+
+const PAYROLL_WORD_TEMPLATE_URL = "/templates/PAYROLL_WORD_TEMPLATE.docx";
+const PAYROLL_EXCEL_TEMPLATE_URL = "/templates/PAYROLL_TEMPLATE.xlsx";
 const DOCX_MIME_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 const XLSX_MIME_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 const ZIP_MIME_TYPE = "application/zip";
@@ -34,11 +31,7 @@ const PAYROLL_EXCEL_START_ROW = 10;
 const PAYROLL_EXCEL_END_ROW = 24;
 const PAYROLL_DEFAULT_AMOUNT = 5000;
 
-function csvCell(value) {
-  return `"${String(value ?? "").replaceAll('"', '""')}"`;
-}
-
-function downloadBlob(filename, blob) {
+function downloadBlob(filename: string, blob: Blob) {
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
@@ -47,48 +40,15 @@ function downloadBlob(filename, blob) {
   URL.revokeObjectURL(url);
 }
 
-function chunkStudents(students) {
-  const chunks = [];
+function chunkStudents(students: PayrollStudent[]) {
+  const chunks: PayrollStudent[][] = [];
   for (let index = 0; index < students.length; index += PAYROLL_MAX_STUDENTS) {
     chunks.push(students.slice(index, index + PAYROLL_MAX_STUDENTS));
   }
   return chunks;
 }
 
-export function downloadCsv(filename, rows) {
-  const csv = rows.map((row) => row.map(csvCell).join(",")).join("\n");
-  downloadBlob(filename, new Blob([csv], { type: "text/csv;charset=utf-8" }));
-}
-
-export function buildStudentExportRows(students) {
-  return students.map((student) => [
-    student.student_id,
-    student.full_name,
-    student.student_number,
-    student.barangay,
-    student.address,
-    student.school_address,
-    student.phone_number,
-    student.school_course,
-    student.year_level,
-    student.batch,
-    student.status,
-    student.renewed ? "Yes" : "No",
-    student.claimed ? "Yes" : "No"
-  ]);
-}
-
-export function buildPayrollExportRows(students) {
-  return students.map((student) => [
-    student.student_id,
-    student.full_name,
-    student.student_number,
-    student.school_course,
-    ""
-  ]);
-}
-
-function formatLongDate(value) {
+function formatLongDate(value?: string) {
   if (!value) return "";
   const date = new Date(`${value}T00:00:00`);
   if (Number.isNaN(date.getTime())) return value;
@@ -99,19 +59,15 @@ function formatLongDate(value) {
   });
 }
 
-function formatSemester(value) {
-  const semester = Number.parseInt(value, 10);
+function formatSemester(value?: string) {
+  const semester = Number.parseInt(value || "", 10);
   if (!Number.isFinite(semester)) return value || "";
   const suffix = semester === 1 ? "st" : semester === 2 ? "nd" : semester === 3 ? "rd" : "th";
   return `${semester}${suffix} Semester`.toUpperCase();
 }
 
-function buildPayrollWordData(students, metadata = {}) {
-  if (students.length > PAYROLL_MAX_STUDENTS) {
-    throw new Error(`Payroll Word export is limited to ${PAYROLL_MAX_STUDENTS} students.`);
-  }
-
-  const data = {
+function buildPayrollWordData(students: PayrollStudent[], metadata: Record<string, string> = {}) {
+  const data: Record<string, unknown> = {
     generated_at: new Date().toLocaleString(),
     date_of_filing: formatLongDate(metadata.date_of_filing),
     school_year: metadata.school_year || "",
@@ -144,7 +100,7 @@ function buildPayrollWordData(students, metadata = {}) {
     data[`student_${row}_school`] = "";
   }
 
-  students.slice(0, PAYROLL_MAX_STUDENTS).forEach((student, index) => {
+  students.forEach((student, index) => {
     const row = index + 1;
     data[`student_${row}_fname`] = student.full_name || "";
     data[`student_${row}_name`] = student.full_name || "";
@@ -159,13 +115,7 @@ function buildPayrollWordData(students, metadata = {}) {
   return data;
 }
 
-function assertPayrollLimit(students) {
-  if (students.length > PAYROLL_MAX_STUDENTS) {
-    throw new Error(`Payroll export is limited to ${PAYROLL_MAX_STUDENTS} students.`);
-  }
-}
-
-function escapeXml(value) {
+function escapeXml(value: unknown) {
   return String(value ?? "")
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
@@ -173,11 +123,11 @@ function escapeXml(value) {
     .replaceAll('"', "&quot;");
 }
 
-function cellPattern(address) {
+function cellPattern(address: string) {
   return new RegExp(`<c\\b(?=[^>]*\\br="${address}")[^>]*?(?:/>|>[\\s\\S]*?</c>)`);
 }
 
-function cellAttributes(cellXml, address) {
+function cellAttributes(cellXml: string, address: string) {
   const openingTag = cellXml.slice(0, cellXml.indexOf(">") + 1);
   if (!openingTag) {
     throw new Error(`Unable to update Excel template cell ${address}.`);
@@ -188,14 +138,14 @@ function cellAttributes(cellXml, address) {
     .replace(/\s+t="[^"]*"/, "");
 }
 
-function replaceCellXml(sheetXml, address, value) {
+function replaceCellXml(sheetXml: string, address: string, value: string | number) {
   const pattern = cellPattern(address);
   const current = sheetXml.match(pattern)?.[0];
   if (!current) {
     throw new Error(`Payroll Excel template is missing expected cell ${address}.`);
   }
   const attrs = cellAttributes(current, address);
-  if (value === "" || value === null || value === undefined) {
+  if (value === "") {
     return sheetXml.replace(pattern, `<c${attrs}/>`);
   }
   if (typeof value === "number") {
@@ -207,7 +157,7 @@ function replaceCellXml(sheetXml, address, value) {
   );
 }
 
-function fillPayrollExcelSheetXml(sheetXml, students, sheetNumber = 1, totalSheets = 1) {
+function fillPayrollExcelSheetXml(sheetXml: string, students: PayrollStudent[], sheetNumber: number, totalSheets: number) {
   let xml = replaceCellXml(sheetXml, "O3", `Sheet ${sheetNumber} of ${totalSheets} Sheets`);
 
   for (let row = PAYROLL_EXCEL_START_ROW; row <= PAYROLL_EXCEL_END_ROW + 1; row += 1) {
@@ -231,26 +181,19 @@ function fillPayrollExcelSheetXml(sheetXml, students, sheetNumber = 1, totalShee
   return xml;
 }
 
-async function buildPayrollWordBlob(students, metadata = {}) {
-  assertPayrollLimit(students);
-  const [{ default: PizZip }, { default: Docxtemplater }] = await Promise.all([
-    import("https://cdn.jsdelivr.net/npm/pizzip@3.1.8/+esm"),
-    import("https://cdn.jsdelivr.net/npm/docxtemplater@3.52.0/+esm")
-  ]);
-
+async function buildPayrollWordBlob(students: PayrollStudent[]) {
   const response = await fetch(PAYROLL_WORD_TEMPLATE_URL);
   if (!response.ok) {
     throw new Error(`Unable to load Word template: ${response.status} ${response.statusText}`);
   }
 
-  const content = await response.arrayBuffer();
-  const zip = new PizZip(content);
+  const zip = new PizZip(await response.arrayBuffer());
   const doc = new Docxtemplater(zip, {
     paragraphLoop: true,
     linebreaks: true
   });
 
-  doc.render(buildPayrollWordData(students, metadata));
+  doc.render(buildPayrollWordData(students));
 
   return doc.getZip().generate({
     type: "blob",
@@ -258,9 +201,7 @@ async function buildPayrollWordBlob(students, metadata = {}) {
   });
 }
 
-async function buildPayrollExcelBlob(students, sheetNumber = 1, totalSheets = 1) {
-  assertPayrollLimit(students);
-  const { default: PizZip } = await import("https://cdn.jsdelivr.net/npm/pizzip@3.1.8/+esm");
+async function buildPayrollExcelBlob(students: PayrollStudent[], sheetNumber: number, totalSheets: number) {
   const response = await fetch(PAYROLL_EXCEL_TEMPLATE_URL);
   if (!response.ok) {
     throw new Error(`Unable to load Excel template: ${response.status} ${response.statusText}`);
@@ -281,53 +222,31 @@ async function buildPayrollExcelBlob(students, sheetNumber = 1, totalSheets = 1)
   });
 }
 
-export class StudentExportService {
-  exportCsv(students, filename = "student-records.csv") {
-    downloadCsv(filename, [STUDENT_EXPORT_HEADERS, ...buildStudentExportRows(students)]);
-  }
-}
-
-export class PayrollExportService {
-  exportCsv(students, filename = "payroll.csv") {
-    downloadCsv(filename, [PAYROLL_EXPORT_HEADERS, ...buildPayrollExportRows(students)]);
+export async function exportPayrollFiles(students: PayrollStudent[], filenamePrefix = "payroll") {
+  if (!students.length) {
+    throw new Error("Select at least one student before exporting payroll files.");
   }
 
-  async exportWord(students, filename = "payroll.docx", metadata = {}) {
-    const blob = await buildPayrollWordBlob(students, metadata);
-    downloadBlob(filename, blob);
+  const groups = chunkStudents(students);
+  const archive = new PizZip();
+
+  for (const [index, group] of groups.entries()) {
+    const part = String(index + 1).padStart(2, "0");
+    const [wordBlob, excelBlob] = await Promise.all([
+      buildPayrollWordBlob(group),
+      buildPayrollExcelBlob(group, index + 1, groups.length)
+    ]);
+
+    archive.file(`${filenamePrefix}/group-${part}/${filenamePrefix}-group-${part}.docx`, await wordBlob.arrayBuffer());
+    archive.file(`${filenamePrefix}/group-${part}/${filenamePrefix}-group-${part}.xlsx`, await excelBlob.arrayBuffer());
   }
 
-  async exportExcel(students, filename = "payroll.xlsx") {
-    const blob = await buildPayrollExcelBlob(students);
-    downloadBlob(filename, blob);
-  }
+  const zipBlob = archive.generate({
+    type: "blob",
+    mimeType: ZIP_MIME_TYPE,
+    compression: "DEFLATE"
+  });
+  downloadBlob(`${filenamePrefix}-${groups.length}-groups.zip`, zipBlob);
 
-  async exportFiles(students, metadata = {}, filenamePrefix = "payroll") {
-    if (!students.length) {
-      throw new Error("Select at least one student before exporting payroll files.");
-    }
-
-    const { default: PizZip } = await import("https://cdn.jsdelivr.net/npm/pizzip@3.1.8/+esm");
-    const groups = chunkStudents(students);
-    const archive = new PizZip();
-
-    for (const [index, group] of groups.entries()) {
-      const part = String(index + 1).padStart(2, "0");
-      const [wordBlob, excelBlob] = await Promise.all([
-        buildPayrollWordBlob(group, metadata),
-        buildPayrollExcelBlob(group, index + 1, groups.length)
-      ]);
-
-      archive.file(`${filenamePrefix}/group-${part}/${filenamePrefix}-group-${part}.docx`, await wordBlob.arrayBuffer());
-      archive.file(`${filenamePrefix}/group-${part}/${filenamePrefix}-group-${part}.xlsx`, await excelBlob.arrayBuffer());
-    }
-
-    const zipBlob = archive.generate({
-      type: "blob",
-      mimeType: ZIP_MIME_TYPE,
-      compression: "DEFLATE"
-    });
-    downloadBlob(`${filenamePrefix}-${groups.length}-groups.zip`, zipBlob);
-    return groups.length;
-  }
+  return groups.length;
 }

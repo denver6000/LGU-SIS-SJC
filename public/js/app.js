@@ -1,5 +1,6 @@
 import {
   createManagedUser,
+  deleteManagedUser,
   deleteBarangay,
   deleteBatch,
   deleteCourse,
@@ -14,6 +15,7 @@ import {
   getStudents,
   importBatchWorkbookOptions,
   deleteTrashStudent,
+  listManagedUsers,
   moveStudentToTrash,
   onAuthUserChanged,
   restoreStudent,
@@ -28,9 +30,10 @@ import {
   signInUser,
   signOutUser,
   storageMode,
+  updateManagedUser,
   updateStudent
-} from "./store.js?v=role-claims-functions-20260520";
-import { PayrollExportService, StudentExportService } from "./export-service.js?v=excel-total-j25-20260513";
+} from "./store.js?v=role-claims-functions-20260526";
+import { PayrollExportService, StudentExportService } from "./export-service.js?v=excel-total-j25-20260526";
 
 const documentFields = [
   "certificate_of_residency",
@@ -147,6 +150,7 @@ const defaultBatchOptions = ["1", "2", "3", "4", "5", "6", "7"];
 
 const ROLE_ADMIN = "admin";
 const ROLE_USER = "user";
+const DEBUG_PREFIX = "[SamAuthDebug]";
 
 const state = {
   students: [],
@@ -157,6 +161,8 @@ const state = {
   batches: [],
   payoutRecords: [],
   trash: [],
+  managedUsers: [],
+  editingManagedUserUid: null,
   editingStudentId: null,
   selectedRenewalStudentId: null,
   selectedPayrollStudentIds: new Set(),
@@ -187,6 +193,10 @@ function userCanDeleteStudent() {
   return state.currentUserRole === ROLE_ADMIN;
 }
 
+function userCanManageStudents() {
+  return state.currentUserRole === ROLE_ADMIN;
+}
+
 function userCanManageUsers() {
   return state.currentUserRole === ROLE_ADMIN;
 }
@@ -195,6 +205,12 @@ function renderRoleGatedUi() {
   qsa("[data-admin-only]").forEach((element) => {
     element.hidden = !userCanManageUsers();
   });
+  if (!userCanManageStudents() && ["register", "import"].includes(document.body.dataset.page)) {
+    setView("dashboard");
+  }
+  if (!userCanManageUsers() && document.body.dataset.page === "users") {
+    setView("dashboard");
+  }
 }
 
 const payrollExportService = new PayrollExportService();
@@ -206,6 +222,7 @@ const viewNames = [
   "records",
   "payouts",
   "import",
+  "users",
   "setup",
   "exports",
   "trash"
@@ -217,6 +234,18 @@ function qs(selector) {
 
 function qsa(selector) {
   return Array.from(document.querySelectorAll(selector));
+}
+
+function debugLog(label, payload) {
+  try {
+    if (payload === undefined) {
+      console.info(`${DEBUG_PREFIX} ${label}`);
+      return;
+    }
+    console.info(`${DEBUG_PREFIX} ${label}`, payload);
+  } catch {
+    console.info(`${DEBUG_PREFIX} ${label}`);
+  }
 }
 
 function escapeHtml(value) {
@@ -285,6 +314,34 @@ function setStatus(message, type = "success", options = {}) {
   if (options.dialog !== false) showFeedbackDialog(message, type);
 }
 
+function normalizeAppError(error, fallback = "Something went wrong. Please try again.") {
+  if (error instanceof Error && error.message) return error.message;
+  if (typeof error === "string" && error.trim()) return error.trim();
+  if (typeof error?.message === "string" && error.message.trim()) return error.message.trim();
+  if (typeof error?.reason?.message === "string" && error.reason.message.trim()) return error.reason.message.trim();
+  return fallback;
+}
+
+function reportAppError(error, fallback) {
+  setStatus(normalizeAppError(error, fallback), "error");
+}
+
+function installGlobalErrorHandlers() {
+  if (window.__samSisGlobalErrorsBound) return;
+  window.__samSisGlobalErrorsBound = true;
+
+  window.addEventListener("unhandledrejection", (event) => {
+    event.preventDefault();
+    reportAppError(event.reason, "A background request failed.");
+  });
+
+  window.addEventListener("error", (event) => {
+    const message = normalizeAppError(event.error || event.message, "");
+    if (!message || message.includes("ResizeObserver")) return;
+    reportAppError(event.error || event.message, "An unexpected application error occurred.");
+  });
+}
+
 function setAuthMessage(message, type = "info") {
   const el = qs("#authMessage");
   if (!el) return;
@@ -311,6 +368,34 @@ function userInitials(name) {
     .slice(0, 2)
     .map((part) => part.charAt(0).toUpperCase())
     .join("") || "SJ";
+}
+
+function setManagedUserFormMode(user = null) {
+  state.editingManagedUserUid = user?.uid || null;
+  const dialog = qs("#managedUserDialog");
+  const form = qs("#managedUserUpdateForm");
+  const title = qs("#managedUserUpdateTitle");
+  const submit = qs("#managedUserUpdateSubmit");
+  const displayNameInput = qs("#managedUserUpdateDisplayName");
+  const passwordInput = qs("#managedUserUpdatePassword");
+
+  if (!dialog || !form || !title || !submit || !displayNameInput || !passwordInput) return;
+
+  form.reset();
+  qs("#managedUserUpdateUid").value = user?.uid || "";
+  qs("#managedUserUpdateEmail").value = user?.email || "";
+  displayNameInput.value = user?.displayName || "";
+  title.textContent = user ? `Update ${user.email || "user"}` : "Update Auth User";
+  submit.disabled = !user;
+
+  if (user && !dialog.open) {
+    dialog.showModal();
+    requestAnimationFrame(() => displayNameInput.focus());
+  }
+
+  if (!user && dialog.open) {
+    dialog.close();
+  }
 }
 
 function isMobileLayout() {
@@ -349,6 +434,12 @@ function setAuthUi(user) {
   document.body.dataset.auth = isSignedIn ? "signed-in" : "signed-out";
   document.body.dataset.role = state.currentUserRole || "none";
   document.body.dataset.sidebar = "closed";
+  debugLog("set-auth-ui", {
+    isSignedIn,
+    uid: user?.uid || "",
+    email: user?.email || "",
+    role: state.currentUserRole || null
+  });
   renderRoleGatedUi();
 }
 
@@ -374,7 +465,14 @@ function urlForView(view) {
 }
 
 function setView(view, options = {}) {
-  const nextView = viewNames.includes(view) ? view : "dashboard";
+  const requestedView = viewNames.includes(view) ? view : "dashboard";
+  let nextView = requestedView;
+  if (!userCanManageStudents() && ["register", "import"].includes(nextView)) {
+    nextView = "dashboard";
+  }
+  if (!userCanManageUsers() && nextView === "users") {
+    nextView = "dashboard";
+  }
   qsa("[data-view]").forEach((section) => {
     section.hidden = section.dataset.view !== nextView;
   });
@@ -382,6 +480,14 @@ function setView(view, options = {}) {
     button.classList.toggle("active", button.dataset.nav === nextView);
   });
   document.body.dataset.page = nextView;
+  debugLog("set-view", {
+    requestedView,
+    nextView,
+    currentRole: state.currentUserRole || null
+  });
+  if (nextView !== "users" && state.editingManagedUserUid) {
+    setManagedUserFormMode();
+  }
   if (nextView === "records") {
     requestAnimationFrame(() => {
       renderStudents();
@@ -535,6 +641,7 @@ function updateActionCounts() {
   setActionCount("records", state.students.length);
   setActionCount("payouts", state.payoutRecords.length);
   setActionCount("import", state.students.length);
+  setActionCount("users", state.managedUsers.length);
   setActionCount("setup", optionCount);
   setActionCount("exports", state.selectedPayrollStudentIds.size);
   setActionCount("trash", state.trash.length);
@@ -565,6 +672,35 @@ function sortStudentsByBatchAndLastName(students) {
     const lastNameB = (b.full_name || "").split(" ").pop().toLowerCase();
 
     return lastNameA.localeCompare(lastNameB);
+  });
+}
+
+function parseSortableNumber(value) {
+  const match = String(value || "").match(/\d+/);
+  return match ? Number.parseInt(match[0], 10) : Number.MAX_SAFE_INTEGER;
+}
+
+function lastNameForSort(fullName) {
+  const [beforeComma] = String(fullName || "").split(",");
+  const parts = beforeComma.trim().split(/\s+/).filter(Boolean);
+  return (parts[parts.length - 1] || fullName || "").toLowerCase();
+}
+
+function sortPayrollStudents(students) {
+  return [...students].sort((a, b) => {
+    const yearDiff = parseSortableNumber(a.year_level) - parseSortableNumber(b.year_level);
+    if (yearDiff !== 0) return yearDiff;
+
+    const lastNameDiff = lastNameForSort(a.full_name).localeCompare(lastNameForSort(b.full_name), undefined, {
+      numeric: true,
+      sensitivity: "base"
+    });
+    if (lastNameDiff !== 0) return lastNameDiff;
+
+    return String(a.full_name || "").localeCompare(String(b.full_name || ""), undefined, {
+      numeric: true,
+      sensitivity: "base"
+    });
   });
 }
 
@@ -647,7 +783,7 @@ function withDerivedPayoutStates(students) {
 function updatePayrollSelectionSummary() {
   const summary = qs("#payrollSelectionSummary");
   if (!summary) return;
-  summary.textContent = `${state.selectedPayrollStudentIds.size} of 15 students selected.`;
+  summary.textContent = `${state.selectedPayrollStudentIds.size} student(s) selected. Exports will be grouped into sets of 15.`;
   updateActionCounts();
 }
 
@@ -658,42 +794,23 @@ function selectAllPayrollStudents() {
     return;
   }
 
-  const remainingSlots = Math.max(0, 15 - state.selectedPayrollStudentIds.size);
   const unselectedStudents = students.filter((student) => !state.selectedPayrollStudentIds.has(studentKey(student)));
-
-  if (!remainingSlots && unselectedStudents.length) {
-    setStatus("Payroll export is limited to 15 selected students.", "error");
-    return;
-  }
-
-  const studentsToAdd = unselectedStudents.slice(0, remainingSlots);
-  studentsToAdd.forEach((student) => state.selectedPayrollStudentIds.add(studentKey(student)));
+  unselectedStudents.forEach((student) => state.selectedPayrollStudentIds.add(studentKey(student)));
 
   renderStudents();
   renderPayrollStudents();
 
-  if (!studentsToAdd.length) {
+  if (!unselectedStudents.length) {
     setStatus("All matching payroll students are already selected.");
     return;
   }
 
-  if (studentsToAdd.length < unselectedStudents.length) {
-    setStatus(`Selected ${studentsToAdd.length} additional student(s). Payroll export is limited to 15 students.`, "info", { dialog: false });
-    return;
-  }
-
-  setStatus(`Selected ${studentsToAdd.length} payroll student(s).`, "info", { dialog: false });
+  setStatus(`Selected ${unselectedStudents.length} additional payroll student(s).`, "info", { dialog: false });
 }
 
 function togglePayrollSelection(input) {
   const selectedId = input.dataset.selectPayroll;
   if (!selectedId) return;
-
-  if (input.checked && state.selectedPayrollStudentIds.size >= 15) {
-    input.checked = false;
-    setStatus("Payroll export is limited to 15 selected students.", "error");
-    return;
-  }
 
   if (input.checked) {
     state.selectedPayrollStudentIds.add(selectedId);
@@ -716,10 +833,10 @@ function filteredPayrollStudents() {
   const search = qs("#payrollSearch").value.trim().toLowerCase();
   const filter = qs("#payrollStatusFilter").value;
   const batch = qs("#payrollBatchFilter").value;
-  return filterStudentRecords(search, filter, batch);
+  return sortPayrollStudents(filterStudentRecords(search, filter, batch, { sort: false }));
 }
 
-function filterStudentRecords(search, filter, batch = "") {
+function filterStudentRecords(search, filter, batch = "", options = {}) {
   const filtered = state.students.filter((student) => {
     const haystack = [
       student.student_id,
@@ -743,7 +860,7 @@ function filterStudentRecords(search, filter, batch = "") {
     return true;
   });
 
-  return sortStudentsByBatchAndLastName(filtered);
+  return options.sort === false ? filtered : sortStudentsByBatchAndLastName(filtered);
 }
 
 function filteredRenewalStudents() {
@@ -870,7 +987,7 @@ function studentRecordRow(student) {
       <td>
         <div class="row-actions">
           <button type="button" data-view-student="${escapeHtml(student.student_id)}">View</button>
-          <button type="button" data-edit="${escapeHtml(student.student_id)}">Edit</button>
+          ${userCanManageStudents() ? `<button type="button" data-edit="${escapeHtml(student.student_id)}">Edit</button>` : ""}
           <button type="button" data-claim="${escapeHtml(student.student_id)}">Claim</button>
           ${userCanDeleteStudent() ? `<button type="button" data-delete="${escapeHtml(student.student_id)}" class="danger">Trash</button>` : ""}
         </div>
@@ -970,6 +1087,24 @@ function renderTrash() {
 }
 
 function renderOptionRows() {
+  const managedUserTable = qs("#managedUserRows");
+  if (managedUserTable) {
+    managedUserTable.innerHTML = state.managedUsers.map((user) => `
+      <tr>
+        <td>${escapeHtml(user.displayName || "No display name")}</td>
+        <td>${escapeHtml(user.email)}</td>
+        <td>${escapeHtml(user.role || "unassigned")}</td>
+        <td>${user.disabled ? "Disabled" : "Active"}</td>
+        <td>
+          <div class="row-actions">
+            <button type="button" data-edit-managed-user="${escapeHtml(user.uid)}">Edit</button>
+            <button type="button" class="danger" data-remove-managed-user="${escapeHtml(user.uid)}">Remove</button>
+          </div>
+        </td>
+      </tr>
+    `).join("") || `<tr><td colspan="5" class="empty-state">No managed users found.</td></tr>`;
+  }
+
   qs("#barangayRows").innerHTML = state.barangays.map((item) => optionRow(item, "barangay")).join("")
     || `<tr><td colspan="3" class="empty-state">No barangay records.</td></tr>`;
   qs("#schoolRows").innerHTML = state.schools.map((item) => optionRow(item, "school")).join("")
@@ -1176,28 +1311,17 @@ async function exportPayrollWord() {
     setStatus("Enter the date of filing, school year, and semester number before exporting payroll.", "error");
     return;
   }
-  if (students.length > 15) {
-    setStatus("Payroll export is limited to 15 selected students.", "error");
-    return;
-  }
 
-  setStatus("Generating payroll Word and Excel files...");
+  const sortedStudents = sortPayrollStudents(withDerivedPayoutStates(students));
+  setStatus("Generating grouped payroll Word and Excel files...");
   try {
-    await withLoading("Generating payroll files...", async () => {
-      const exportStudents = withDerivedPayoutStates(students);
-      await payrollExportService.exportWord(exportStudents, "payroll.docx", templateFields);
-      await payrollExportService.exportExcel(exportStudents);
-      const exportedAt = new Date().toISOString();
-      await Promise.all(students.map((student) => savePayoutRecord(buildPayoutRecord(student, {
-        type: "payroll_prepared",
-        status: "prepared",
-        created_at: exportedAt,
-        notes: "Included in generated payroll Word and Excel export."
-      }))));
-    });
+    const groupCount = await withLoading("Generating payroll files...", () =>
+      payrollExportService.exportFiles(sortedStudents, templateFields)
+    );
     state.selectedPayrollStudentIds.clear();
-    setStatus(`Generated payroll Word and Excel files and marked ${students.length} student(s) as payrolled.`);
-    await refresh();
+    renderStudents();
+    renderPayrollStudents();
+    setStatus(`Generated ${groupCount} payroll group(s) for ${students.length} selected student(s).`);
   } catch (error) {
     setStatus(error.message, "error");
   }
@@ -1220,7 +1344,14 @@ async function refresh() {
   setLoading(true, "Loading records...");
   const storageModeEl = qs("#storageMode");
   try {
+    debugLog("refresh-start", {
+      role: state.currentUserRole || null,
+      uid: state.currentUser?.uid || "",
+      userCanManageUsers: userCanManageUsers()
+    });
     if (storageModeEl) storageModeEl.textContent = storageMode();
+    const trashPromise = userCanManageStudents() ? getTrash() : Promise.resolve([]);
+    const managedUsersPromise = userCanManageUsers() ? listManagedUsers() : Promise.resolve([]);
     const [
       students,
       schoolCourses,
@@ -1229,16 +1360,18 @@ async function refresh() {
       barangays,
       schools,
       courses,
-      batches
+      batches,
+      managedUsers
     ] = await Promise.all([
       getStudents(),
       getSchoolCourses(),
-      getTrash(),
+      trashPromise,
       getPayoutRecords(),
       getBarangays(),
       getSchools(),
       getCourses(),
-      getBatches()
+      getBatches(),
+      managedUsersPromise
     ]);
     state.students = students;
     state.schoolCourses = schoolCourses;
@@ -1249,6 +1382,7 @@ async function refresh() {
     state.schools = schools;
     state.courses = courses;
     state.batches = batches;
+    state.managedUsers = managedUsers;
     rebuildPayoutIndexes();
     if (await ensureBatchWorkbookOptions()) {
       [state.barangays, state.schools, state.batches] = await Promise.all([getBarangays(), getSchools(), getBatches()]);
@@ -1266,6 +1400,9 @@ async function refresh() {
     if (state.selectedRenewalStudentId && !validStudentIds.has(state.selectedRenewalStudentId)) {
       state.selectedRenewalStudentId = null;
     }
+    if (state.editingManagedUserUid && !state.managedUsers.some((user) => user.uid === state.editingManagedUserUid)) {
+      setManagedUserFormMode();
+    }
     updateSchoolCourseOptions();
     renderBarangayOptions();
     renderBatchOptions();
@@ -1276,6 +1413,12 @@ async function refresh() {
     renderOptionRows();
     renderPayoutRecords();
     renderTrash();
+    debugLog("refresh-success", {
+      students: state.students.length,
+      payoutRecords: state.payoutRecords.length,
+      trash: state.trash.length,
+      managedUsers: state.managedUsers.length
+    });
   } finally {
     setLoading(false);
   }
@@ -1292,6 +1435,7 @@ async function seedLocalIfEmpty() {
 function bindEvents() {
   if (state.appEventsBound) return;
   state.appEventsBound = true;
+  installGlobalErrorHandlers();
   qsa("[data-nav]").forEach((button) => button.addEventListener("click", () => navigateToView(button.dataset.nav)));
   qs("#openSidebar").addEventListener("click", openSidebar);
   qs("#navScrim").addEventListener("click", closeSidebar);
@@ -1348,6 +1492,10 @@ function bindEvents() {
 
   qs("#studentForm").addEventListener("submit", async (event) => {
     event.preventDefault();
+    if (!userCanManageStudents()) {
+      setStatus("Only admins can add or update student records.", "error");
+      return;
+    }
     const formStudent = readStudentForm(event.currentTarget);
     await withLoading("Saving student record...", async () => {
       if (state.editingStudentId) {
@@ -1412,12 +1560,93 @@ function bindEvents() {
     });
 
     form.reset();
+    await refresh();
+  });
+
+  qs("#managedUserUpdateForm").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (!userCanManageUsers()) {
+      setStatus("Only admins can update managed users.", "error");
+      return;
+    }
+
+    const form = event.currentTarget;
+    const payload = Object.fromEntries(new FormData(form).entries());
+    const uid = String(payload.uid || "").trim();
+    const displayName = String(payload.displayName || "").trim();
+    const password = String(payload.password || "").trim();
+
+    if (!uid) {
+      setStatus("Select a user before updating.", "error");
+      return;
+    }
+    if (!displayName && !password) {
+      setStatus("Provide a display name or a new password.", "error");
+      return;
+    }
+
+    await withLoading("Updating user account...", async () => {
+      await updateManagedUser({ uid, displayName, password });
+      setStatus("Managed user updated.");
+    });
+
+    setManagedUserFormMode();
+    await refresh();
+  });
+
+  qs("#closeManagedUserDialog").addEventListener("click", () => {
+    setManagedUserFormMode();
+  });
+
+  qs("#cancelManagedUserUpdate").addEventListener("click", () => {
+    setManagedUserFormMode();
+    setStatus("User update cancelled.", "info", { dialog: false });
+  });
+
+  qs("#managedUserDialog").addEventListener("cancel", () => {
+    setManagedUserFormMode();
+  });
+
+  qs("#managedUserDialog").addEventListener("click", (event) => {
+    if (event.target === event.currentTarget) {
+      setManagedUserFormMode();
+    }
   });
 
   qs("#loadDefaultBarangays").addEventListener("click", async () => {
     await withLoading("Loading default barangays...", () => Promise.all(barangayOptions.map((name) => saveBarangay({ name }))));
     setStatus("Barangays from the legacy desktop registration list loaded into the editable collection.");
     await refresh();
+  });
+
+  qs("[data-view='users']").addEventListener("click", async (event) => {
+    const editManagedUserId = event.target.dataset.editManagedUser;
+    const removeManagedUserId = event.target.dataset.removeManagedUser;
+    if (editManagedUserId) {
+      if (!userCanManageUsers()) {
+        setStatus("Only admins can update managed users.", "error");
+        return;
+      }
+      const user = state.managedUsers.find((item) => item.uid === editManagedUserId);
+      if (!user) {
+        setStatus("Managed user not found.", "error");
+        return;
+      }
+      setManagedUserFormMode(user);
+      return;
+    }
+
+    if (removeManagedUserId) {
+      if (!userCanManageUsers()) {
+        setStatus("Only admins can remove managed users.", "error");
+        return;
+      }
+      if (!confirm("Remove this Firebase Authentication user?")) return;
+      await withLoading("Removing user account...", () => deleteManagedUser(removeManagedUserId));
+      setStatus("Managed user removed.");
+      await refresh();
+      return;
+    }
   });
 
   qs("[data-view='setup']").addEventListener("click", async (event) => {
@@ -1498,6 +1727,10 @@ function bindEvents() {
       return;
     }
     if (editId) {
+      if (!userCanManageStudents()) {
+        setStatus("Only admins can edit student records.", "error");
+        return;
+      }
       const student = state.students.find((item) => item.student_id === editId);
       if (student) {
         setFormMode(student);
@@ -1537,6 +1770,10 @@ function bindEvents() {
     const deleteForeverId = event.target.dataset.deleteForever;
 
     if (restoreId) {
+      if (!userCanManageStudents()) {
+        setStatus("Only admins can restore student records.", "error");
+        return;
+      }
       await withLoading("Restoring student...", () => restoreStudent(restoreId));
       setStatus("Student restored from trash.");
       await refresh();
@@ -1554,6 +1791,10 @@ function bindEvents() {
 
   qs("#importForm").addEventListener("submit", async (event) => {
     event.preventDefault();
+    if (!userCanManageStudents()) {
+      setStatus("Only admins can import student records.", "error");
+      return;
+    }
     const file = qs("#excelFile").files[0];
     if (!file) {
       setStatus("Choose an Excel file to import.", "error");
@@ -1622,6 +1863,7 @@ async function startApp() {
 
 async function initAuth() {
   bindAuthEvents();
+  installGlobalErrorHandlers();
   setLoading(true, "Checking sign-in...");
   setAuthMessage("Checking sign-in...");
 
@@ -1646,6 +1888,14 @@ async function initAuth() {
       state.currentUser = session.user;
       state.currentUserClaims = session.claims || {};
       state.currentUserRole = session.role;
+      debugLog("auth-session-ready", {
+        uid: session.user.uid,
+        email: session.user.email || "",
+        role: session.role || null,
+        claimsRole: session.claims?.role || null,
+        admin: session.claims?.admin === true,
+        user: session.claims?.user === true
+      });
 
       if (!userHasAppAccess()) {
         state.pendingSignedOutAuthMessage = {
@@ -1661,13 +1911,14 @@ async function initAuth() {
       try {
         await startApp();
       } catch (error) {
-        setStatus(error.message, "error");
+        reportAppError(error, "Unable to start the application.");
       }
     });
   } catch (error) {
     setLoading(false);
     setAuthUi(null);
-    setAuthMessage(error.message || "Firebase Auth could not start.", "error");
+    setAuthMessage(normalizeAppError(error, "Firebase Auth could not start."), "error");
+    setStatus(normalizeAppError(error, "Firebase Auth could not start."), "error");
   }
 }
 
