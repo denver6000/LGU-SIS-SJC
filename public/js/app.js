@@ -227,6 +227,30 @@ const viewNames = [
   "exports",
   "trash"
 ];
+const viewRoutes = {
+  dashboard: "dashboard.html",
+  register: "register.html",
+  renewal: "renewal.html",
+  records: "records.html",
+  payouts: "payouts.html",
+  import: "import.html",
+  users: "users.html",
+  setup: "setup.html",
+  exports: "exports.html",
+  trash: "trash.html"
+};
+const viewTitles = {
+  dashboard: "Dashboard",
+  register: "Student Registry",
+  renewal: "Renewal Tracking",
+  records: "Scholarship Listing",
+  payouts: "Payout Records",
+  import: "Scholarship Import",
+  users: "User Management",
+  setup: "School / Course Setup",
+  exports: "Payroll & Exports",
+  trash: "Trash"
+};
 
 function qs(selector) {
   return document.querySelector(selector);
@@ -234,6 +258,15 @@ function qs(selector) {
 
 function qsa(selector) {
   return Array.from(document.querySelectorAll(selector));
+}
+
+function resetForm(form, label = "form") {
+  if (form && typeof form.reset === "function") {
+    form.reset();
+    return true;
+  }
+  console.warn(`${DEBUG_PREFIX} Skipped reset for missing ${label}.`);
+  return false;
 }
 
 function debugLog(label, payload) {
@@ -381,7 +414,7 @@ function setManagedUserFormMode(user = null) {
 
   if (!dialog || !form || !title || !submit || !displayNameInput || !passwordInput) return;
 
-  form.reset();
+  resetForm(form, "#managedUserUpdateForm");
   qs("#managedUserUpdateUid").value = user?.uid || "";
   qs("#managedUserUpdateEmail").value = user?.email || "";
   displayNameInput.value = user?.displayName || "";
@@ -455,13 +488,29 @@ function setLoginBusy(isBusy) {
 
 function currentRouteView() {
   const view = new URLSearchParams(window.location.search).get("view");
-  return viewNames.includes(view) ? view : "dashboard";
+  if (viewNames.includes(view)) return view;
+
+  const pathname = (window.location.pathname || "/").toLowerCase().replace(/\/+$/, "") || "/";
+  const direct = pathname.replace(/^\//, "");
+  if (viewNames.includes(direct)) return direct;
+
+  const pathView = Object.entries(viewRoutes).find(([, route]) => {
+    const normalizedRoute = String(route || "").toLowerCase();
+    const noExt = normalizedRoute.replace(/\.html$/, "");
+    return (
+      pathname.endsWith(`/${normalizedRoute}`) ||
+      pathname.endsWith(`/${noExt}`) ||
+      pathname === `/${normalizedRoute}` ||
+      pathname === `/${noExt}`
+    );
+  });
+
+  return pathView ? pathView[0] : "dashboard";
 }
 
 function urlForView(view) {
-  const url = new URL(window.location.href);
-  url.searchParams.set("view", view);
-  return `${url.pathname}${url.search}${url.hash}`;
+  const route = viewRoutes[view] || viewRoutes.dashboard;
+  return `${route}${window.location.hash}`;
 }
 
 function setView(view, options = {}) {
@@ -480,6 +529,7 @@ function setView(view, options = {}) {
     button.classList.toggle("active", button.dataset.nav === nextView);
   });
   document.body.dataset.page = nextView;
+  document.title = `${viewTitles[nextView] || "Dashboard"} · Student Information System`;
   debugLog("set-view", {
     requestedView,
     nextView,
@@ -494,8 +544,11 @@ function setView(view, options = {}) {
       refreshStudentRowsVirtualizer(true);
     });
   }
-  if (options.push !== false && urlForView(nextView) !== `${window.location.pathname}${window.location.search}${window.location.hash}`) {
-    window.history.pushState({ view: nextView }, "", urlForView(nextView));
+  const nextUrl = urlForView(nextView);
+  const currentUrl = `${window.location.pathname.replace(/^\//, "")}${window.location.hash}`;
+  if (options.push !== false && nextUrl !== currentUrl) {
+    window.location.assign(nextUrl);
+    return;
   }
 }
 
@@ -538,12 +591,16 @@ function readStudentForm(form) {
 
 function setFormMode(student = null) {
   const form = qs("#studentForm");
+  if (!form) return;
   state.editingStudentId = student?.student_id || null;
-  qs("#studentFormTitle").textContent = student ? "Update Student Record" : "Register New Student";
-  qs("#studentSubmitLabel").textContent = student ? "Update Student" : "Save Student";
-  qs("#cancelEditStudent").hidden = !student;
+  const title = qs("#studentFormTitle");
+  const submitLabel = qs("#studentSubmitLabel");
+  const cancelEdit = qs("#cancelEditStudent");
+  if (title) title.textContent = student ? "Update Student Record" : "Register New Student";
+  if (submitLabel) submitLabel.textContent = student ? "Update Student" : "Save Student";
+  if (cancelEdit) cancelEdit.hidden = !student;
 
-  form.reset();
+  resetForm(form, "#studentForm");
   if (!student) return;
 
   [
@@ -1506,16 +1563,28 @@ function bindEvents() {
         setStatus("Student record saved.");
       }
     });
-    event.currentTarget.reset();
+    resetForm(event.currentTarget, "#studentForm");
     setFormMode();
     await refresh();
     setView("records");
   });
 
+  const documentChecklist = qs(".documents");
+  if (documentChecklist) {
+    documentChecklist.addEventListener("click", (event) => {
+      const label = event.target.closest("label");
+      if (!label) return;
+      const checkbox = label.querySelector("input[type='checkbox']");
+      if (!checkbox || checkbox.disabled) return;
+      event.preventDefault();
+      checkbox.checked = !checkbox.checked;
+    });
+  }
+
   qs("#barangayForm").addEventListener("submit", async (event) => {
     event.preventDefault();
     await withLoading("Saving barangay...", () => saveBarangay(Object.fromEntries(new FormData(event.currentTarget).entries())));
-    event.currentTarget.reset();
+    resetForm(event.currentTarget, "#barangayForm");
     setStatus("Barangay saved.");
     await refresh();
   });
@@ -1523,7 +1592,7 @@ function bindEvents() {
   qs("#schoolForm").addEventListener("submit", async (event) => {
     event.preventDefault();
     await withLoading("Saving school...", () => saveSchool(Object.fromEntries(new FormData(event.currentTarget).entries())));
-    event.currentTarget.reset();
+    resetForm(event.currentTarget, "#schoolForm");
     setStatus("School saved.");
     await refresh();
   });
@@ -1531,7 +1600,7 @@ function bindEvents() {
   qs("#courseForm").addEventListener("submit", async (event) => {
     event.preventDefault();
     await withLoading("Saving course...", () => saveCourse(Object.fromEntries(new FormData(event.currentTarget).entries())));
-    event.currentTarget.reset();
+    resetForm(event.currentTarget, "#courseForm");
     setStatus("Course saved.");
     await refresh();
   });
@@ -1539,7 +1608,7 @@ function bindEvents() {
   qs("#batchForm").addEventListener("submit", async (event) => {
     event.preventDefault();
     await withLoading("Saving batch...", () => saveBatch(Object.fromEntries(new FormData(event.currentTarget).entries())));
-    event.currentTarget.reset();
+    resetForm(event.currentTarget, "#batchForm");
     setStatus("Batch saved.");
     await refresh();
   });
@@ -1559,7 +1628,7 @@ function bindEvents() {
       setStatus(`Created ${result.role} user: ${result.email}.`);
     });
 
-    form.reset();
+    resetForm(form, "#userManagementForm");
     await refresh();
   });
 
@@ -1804,7 +1873,7 @@ function bindEvents() {
     try {
       setStatus("Importing scholarship Excel data...");
       const imported = await withLoading("Importing scholarship records...", () => importStudentsFromExcel(file));
-      event.currentTarget.reset();
+      resetForm(event.currentTarget, "#importForm");
       setStatus(`Imported ${imported} student record(s).`);
       await refresh();
       setView("records");
@@ -1840,7 +1909,7 @@ function bindAuthEvents() {
       setAuthMessage("Checking account...");
       await signInUser(email, password);
       setAuthMessage("");
-      event.currentTarget.reset();
+      resetForm(event.currentTarget, "#authForm");
     } catch (error) {
       setAuthMessage(error.message || "Sign in failed.", "error");
     } finally {

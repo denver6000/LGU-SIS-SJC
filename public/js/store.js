@@ -14,6 +14,11 @@ const LOCAL_KEYS = {
 const BATCH_WORKBOOK_SOURCE = "BATCH 1-7.xlsx";
 const BATCH_OPTIONS_SEED_URL = "/data/batch_options.seed.json";
 const FIRESTORE_BATCH_LIMIT = 450;
+const EMULATOR_PORTS = {
+  auth: 9099,
+  firestore: 8080,
+  functions: 5001
+};
 
 let firebaseRuntime = null;
 const ROLE_ADMIN = "admin";
@@ -51,6 +56,11 @@ function hasFirebaseConfig() {
   );
 }
 
+function shouldUseEmulators() {
+  const params = new URLSearchParams(window.location.search);
+  return params.get("emulators") === "1" || ["localhost", "127.0.0.1"].includes(window.location.hostname);
+}
+
 async function getFirebaseRuntime() {
   if (!hasFirebaseConfig()) return null;
   if (firebaseRuntime) return firebaseRuntime;
@@ -63,6 +73,11 @@ async function getFirebaseRuntime() {
   const db = firestore.getFirestore(app);
   const auth = authModule.getAuth(app);
   const functions = functionsModule.getFunctions(app, "asia-southeast1");
+  if (shouldUseEmulators()) {
+    firestore.connectFirestoreEmulator(db, "127.0.0.1", EMULATOR_PORTS.firestore);
+    authModule.connectAuthEmulator(auth, `http://127.0.0.1:${EMULATOR_PORTS.auth}`, { disableWarnings: true });
+    functionsModule.connectFunctionsEmulator(functions, "127.0.0.1", EMULATOR_PORTS.functions);
+  }
   firebaseRuntime = { db, firestore, auth, authModule, functions, functionsModule };
   debugLog("firebase-runtime-ready", {
     projectId: FIREBASE_CONFIG.projectId,

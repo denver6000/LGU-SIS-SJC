@@ -1,0 +1,869 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Student Information System</title>
+  <link rel="icon" href="./favicon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <section class="auth-view" id="authView" aria-labelledby="authTitle">
+    <div class="brand auth-brand">
+      <div class="brand-mark">SJ</div>
+      <div>
+        <p>San Jose City Educational Assistance</p>
+        <h1>Student Information System</h1>
+      </div>
+    </div>
+    <form class="auth-panel" id="authForm">
+      <div>
+        <p class="eyebrow">Secure Access</p>
+        <h2 id="authTitle">Sign In</h2>
+      </div>
+      <div class="field-group">
+        <label for="loginEmail">Email</label>
+        <input id="loginEmail" name="email" type="email" autocomplete="email" required>
+      </div>
+      <div class="field-group">
+        <label for="loginPassword">Password</label>
+        <input id="loginPassword" name="password" type="password" autocomplete="current-password" required>
+      </div>
+      <p class="auth-note">Access is controlled by Firebase Authentication and custom role claims assigned to your account.</p>
+      <p class="auth-message" id="authMessage" aria-live="polite"></p>
+      <div class="actions auth-actions">
+        <button type="submit" class="primary" id="loginSubmit">Sign In</button>
+      </div>
+    </form>
+  </section>
+
+  <header class="topbar" id="appTopbar" hidden>
+    <div class="topbar-leading">
+      <button type="button" class="nav-toggle" id="openSidebar" aria-controls="appSidebar" aria-expanded="false" aria-label="Open navigation">
+        <i data-lucide="panel-left" aria-hidden="true"></i>
+      </button>
+      <div class="brand">
+        <div class="brand-mark">SJ</div>
+        <div>
+          <p>San Jose City Educational Assistance</p>
+          <h1>Student Information System</h1>
+        </div>
+      </div>
+    </div>
+    <div class="header-actions">
+      <span class="signed-in-user" id="signedInUser"></span>
+    </div>
+  </header>
+
+  <div class="nav-scrim" id="navScrim" hidden></div>
+
+  <div class="layout" id="appLayout" hidden>
+    <aside class="app-sidebar" id="appSidebar" aria-label="Primary routes and actions">
+      <div class="sidebar-shell">
+        <div class="sidebar-profile">
+          <div class="profile-avatar" id="profileAvatar">SJ</div>
+          <div class="profile-copy">
+            <strong id="sidebarUserName">Signed In User</strong>
+            <span id="sidebarUserRole">Role</span>
+            <span id="sidebarUserEmail">email@example.com</span>
+          </div>
+        </div>
+
+        <div class="sidebar-toolbar">
+          <button type="button" class="sidebar-utility" id="signOut">
+            <i data-lucide="log-out" aria-hidden="true"></i>
+            <span>Sign Out</span>
+          </button>
+        </div>
+
+        <nav class="action-nav" aria-label="Primary actions">
+          <button type="button" data-nav="dashboard"><i data-lucide="layout-dashboard" aria-hidden="true"></i><span>Dashboard</span><strong class="action-count" data-count-for="dashboard">0</strong></button>
+          <button type="button" data-nav="register" data-admin-only hidden><i data-lucide="user-round-plus" aria-hidden="true"></i><span>Student Registry</span><strong class="action-count" data-count-for="register">0</strong></button>
+          <button type="button" data-nav="renewal"><i data-lucide="repeat-2" aria-hidden="true"></i><span>Renewal Tracking</span><strong class="action-count" data-count-for="renewal">0</strong></button>
+          <button type="button" data-nav="records"><i data-lucide="clipboard-list" aria-hidden="true"></i><span>Scholarship Listing</span><strong class="action-count" data-count-for="records">0</strong></button>
+          <button type="button" data-nav="payouts"><i data-lucide="receipt-text" aria-hidden="true"></i><span>Payout Records</span><strong class="action-count" data-count-for="payouts">0</strong></button>
+          <button type="button" data-nav="import" data-admin-only hidden><i data-lucide="file-up" aria-hidden="true"></i><span>Scholarship Import</span><strong class="action-count" data-count-for="import">0</strong></button>
+          <button type="button" data-nav="users" data-admin-only hidden><i data-lucide="users" aria-hidden="true"></i><span>User Management</span><strong class="action-count" data-count-for="users">0</strong></button>
+          <button type="button" data-nav="setup"><i data-lucide="sliders-horizontal" aria-hidden="true"></i><span>School / Course Setup</span><strong class="action-count" data-count-for="setup">0</strong></button>
+          <button type="button" data-nav="exports"><i data-lucide="file-down" aria-hidden="true"></i><span>Payroll & Exports</span><strong class="action-count" data-count-for="exports">0</strong></button>
+          <button type="button" data-nav="trash"><i data-lucide="trash-2" aria-hidden="true"></i><span>Trash</span><strong class="action-count" data-count-for="trash">0</strong></button>
+        </nav>
+      </div>
+    </aside>
+
+    <main class="content">
+      <p class="status-message" id="statusMessage"></p>
+      <section class="view" data-view="dashboard">
+        <div class="dashboard-header">
+          <div>
+            <p class="eyebrow">Dashboard</p>
+            <h2>Student Information System</h2>
+            <p class="hero-note">Quickly access scholar records, monitor renewals, and manage payroll from one clear control panel.</p>
+          </div>
+        </div>
+
+        <div class="stats-grid">
+          <div class="stat-card card">
+            <p class="stat-label">Total Scholars</p>
+            <div class="stat-value" id="totalStudents">0</div>
+            <p class="stat-note">Active scholars in the registry</p>
+          </div>
+          <div class="stat-card card">
+            <p class="stat-label">Pending Renewals</p>
+            <div class="stat-value" id="pendingRenewals">0</div>
+            <p class="stat-note">Scholarship renewals awaiting review</p>
+          </div>
+          <div class="stat-card card">
+            <p class="stat-label">Approved Scholars</p>
+            <div class="stat-value" id="claimedStudents">0</div>
+            <p class="stat-note">Students approved this cycle</p>
+          </div>
+          <div class="stat-card card">
+            <p class="stat-label">Trash Records</p>
+            <div class="stat-value" id="trashCount">0</div>
+            <p class="stat-note">Deleted or archived records</p>
+          </div>
+        </div>
+
+        <div class="workflow-area">
+          <div class="workflow-grid">
+            <button type="button" class="workflow-card" data-nav="register" data-admin-only hidden>
+              <i data-lucide="user-round-plus" aria-hidden="true"></i>
+              <h3>Student Registry</h3>
+              <p>Register new students and update records with a single tap.</p>
+            </button>
+            <button type="button" class="workflow-card" data-nav="renewal">
+              <i data-lucide="repeat-2" aria-hidden="true"></i>
+              <h3>Academic Renewal</h3>
+              <p>Track requirement submissions and verification status.</p>
+            </button>
+            <button type="button" class="workflow-card" data-nav="records">
+              <i data-lucide="clipboard-list" aria-hidden="true"></i>
+              <h3>Scholarship Listing</h3>
+              <p>Search and filter the full scholar database quickly.</p>
+            </button>
+            <button type="button" class="workflow-card" data-nav="payouts">
+              <i data-lucide="receipt-text" aria-hidden="true"></i>
+              <h3>Payroll Hub</h3>
+              <p>Prepare, verify, and export payroll data easily.</p>
+            </button>
+            <button type="button" class="workflow-card" data-nav="exports">
+              <i data-lucide="file-down" aria-hidden="true"></i>
+              <h3>Reporting & Exports</h3>
+              <p>Generate reports for Excel, PDF, and audit review.</p>
+            </button>
+            <button type="button" class="workflow-card" data-nav="setup">
+              <i data-lucide="sliders-horizontal" aria-hidden="true"></i>
+              <h3>School / Course Setup</h3>
+              <p>Manage barangays, schools, courses, and batches.</p>
+            </button>
+            <button type="button" class="workflow-card" data-nav="users" data-admin-only hidden>
+              <i data-lucide="users" aria-hidden="true"></i>
+              <h3>User Management</h3>
+              <p>Create staff accounts, assign roles, and remove access when needed.</p>
+            </button>
+          </div>
+
+          <aside class="alerts-panel">
+            <div class="alert-card">
+              <div class="alert-header">
+                <p class="eyebrow">Current Alerts</p>
+                <h3>Renewal Deadlines</h3>
+              </div>
+              <div class="alert-item">
+                <strong>Audit Flags</strong>
+                <p>15 students missing Enrollment Form for Batch 4.</p>
+              </div>
+              <div class="alert-item">
+                <strong>Priority</strong>
+                <p>Review pending renewals and update payroll records.</p>
+              </div>
+            </div>
+          </aside>
+        </div>
+      </section>
+
+      <section class="view" data-view="register" hidden>
+        <div class="section-header">
+          <div>
+            <p class="eyebrow">Student Registration</p>
+            <h2 id="studentFormTitle">Register New Student</h2>
+          </div>
+        </div>
+        <form class="panel" id="studentForm">
+          <div class="form-grid">
+            <div class="field-group">
+              <label for="full_name">Full Name</label>
+              <input id="full_name" name="full_name" required>
+            </div>
+            <div class="field-group">
+              <label for="student_number">Student Number</label>
+              <input id="student_number" name="student_number">
+            </div>
+            <div class="field-group">
+              <label for="barangay">Barangay</label>
+              <select id="barangay" name="barangay">
+                <option value="">Select Barangay</option>
+              </select>
+            </div>
+            <div class="field-group">
+              <label for="address">Address</label>
+              <input id="address" name="address" required>
+            </div>
+            <div class="field-group">
+              <label for="phone_number">Contact Number</label>
+              <input id="phone_number" name="phone_number" required>
+            </div>
+            <div class="field-group">
+              <label for="school_address">School</label>
+              <input id="school_address" name="school_address" list="schoolList">
+            </div>
+            <div class="field-group">
+              <label for="school_course">Course</label>
+              <input id="school_course" name="school_course" list="courseList">
+            </div>
+            <div class="field-group">
+              <label for="year_level">Year Level</label>
+              <select id="year_level" name="year_level">
+                <option value="">Select Year Level</option>
+                <option value="1">1</option>
+                <option value="2">2</option>
+                <option value="3">3</option>
+                <option value="4">4</option>
+                <option value="5">5</option>
+                <option value="6">6</option>
+              </select>
+            </div>
+            <div class="field-group">
+              <label for="batch">Batch</label>
+              <select id="batch" name="batch">
+                <option value="">Select Batch</option>
+                <option value="1">1</option>
+                <option value="2">2</option>
+                <option value="3">3</option>
+                <option value="4">4</option>
+                <option value="5">5</option>
+                <option value="6">6</option>
+                <option value="7">7</option>
+              </select>
+            </div>
+          </div>
+
+          <datalist id="schoolList"></datalist>
+          <datalist id="courseList"></datalist>
+
+          <div class="documents">
+            <label><input type="checkbox" name="certificate_of_residency"> Certificate of Residency</label>
+            <label><input type="checkbox" name="pagpapatunay_form"> Pagpapatunay Form</label>
+            <label><input type="checkbox" name="picture_of_the_house"> Picture of the House</label>
+            <label><input type="checkbox" name="good_moral_certificate"> Good Moral Certificate</label>
+            <label><input type="checkbox" name="original_certificate_of_grades"> Original Certificate of Grades</label>
+            <label><input type="checkbox" name="proof_of_enrollment"> Proof of Enrollment</label>
+            <label><input type="checkbox" name="school_id"> School ID</label>
+          </div>
+
+          <div class="actions">
+            <button type="submit" class="primary" id="studentSubmitLabel">Save Student</button>
+            <button type="button" id="cancelEditStudent" hidden>Cancel Edit</button>
+            <button type="reset">Clear</button>
+          </div>
+        </form>
+      </section>
+
+      <section class="view" data-view="renewal" hidden>
+        <div class="section-header">
+          <div>
+            <p class="eyebrow">Renewal Tracking</p>
+            <h2>Review Prior Claimants</h2>
+          </div>
+        </div>
+        <div class="filters">
+          <input id="renewalSearch" placeholder="Search name, ID, school, course">
+          <select id="renewalBatchFilter">
+            <option value="">All batches</option>
+            <option value="1">Batch 1</option>
+            <option value="2">Batch 2</option>
+            <option value="3">Batch 3</option>
+            <option value="4">Batch 4</option>
+            <option value="5">Batch 5</option>
+            <option value="6">Batch 6</option>
+            <option value="7">Batch 7</option>
+            <option value="none">No batch indicated</option>
+          </select>
+          <select id="renewalYearFilter">
+            <option value="">All year levels</option>
+            <option value="1">Year 1</option>
+            <option value="2">Year 2</option>
+            <option value="3">Year 3</option>
+            <option value="4">Year 4</option>
+            <option value="5">Year 5</option>
+            <option value="6">Year 6</option>
+          </select>
+          <select id="renewalStatusFilter">
+            <option value="pending">Claimed, pending renewal</option>
+            <option value="">All renewal states</option>
+            <option value="renewed">Renewal tracked</option>
+          </select>
+        </div>
+        <div class="panel workflow-panel">
+          <p id="renewalSelectionSummary">No previously claimed student selected for renewal.</p>
+          <div class="actions">
+            <button type="button" class="primary" id="saveRenewal">Save Renewal Tracking</button>
+            <button type="button" id="clearRenewalSelection">Clear Selection</button>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Select</th>
+                <th>ID</th>
+                <th>Name</th>
+                <th>School</th>
+                <th>Course</th>
+                <th>Year</th>
+                <th>Batch</th>
+                <th>Status</th>
+                <th>Renewal Tracked</th>
+              </tr>
+            </thead>
+            <tbody id="renewalRows"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="view" data-view="import" hidden>
+        <div class="section-header">
+          <div>
+            <p class="eyebrow">Scholarship Import</p>
+            <h2>Import Excel Records</h2>
+          </div>
+        </div>
+        <form class="panel" id="importForm">
+          <div class="field-group">
+            <label for="excelFile">Excel File</label>
+            <input id="excelFile" type="file" accept=".xlsx,.xls,.csv">
+          </div>
+          <p class="helper-text">Supported headers include Full Name, Student ID, Student Number, Barangay, Address, Contact Number, School, Course, Year Level, and Batch.</p>
+          <div class="actions">
+            <button class="primary" type="submit">Import Students</button>
+          </div>
+        </form>
+      </section>
+
+      <section class="view" data-view="records" hidden>
+        <div class="section-header">
+          <div>
+            <p class="eyebrow">Scholarship Listing</p>
+            <h2>Student Records</h2>
+          </div>
+        </div>
+        <div class="filters">
+          <input id="searchStudents" placeholder="Search name, ID, school, course, batch">
+          <select id="statusFilter">
+            <option value="">All records</option>
+            <option value="renewed">Renewal tracked</option>
+            <option value="unrenewed">Renewal not tracked</option>
+            <option value="claimed">Has payout record</option>
+            <option value="unclaimed">No payout record</option>
+            <option value="incomplete">Incomplete documents</option>
+          </select>
+          <select id="batchFilter">
+            <option value="">All batches</option>
+            <option value="1">Batch 1</option>
+            <option value="2">Batch 2</option>
+            <option value="3">Batch 3</option>
+            <option value="4">Batch 4</option>
+            <option value="5">Batch 5</option>
+            <option value="6">Batch 6</option>
+            <option value="7">Batch 7</option>
+            <option value="none">No batch indicated</option>
+          </select>
+        </div>
+        <div class="table-wrap table-wrap-records">
+          <div class="clusterize">
+            <table class="records-table records-table-head" aria-hidden="true">
+              <colgroup>
+                <col class="col-payroll">
+                <col class="col-id">
+                <col class="col-name">
+                <col class="col-school">
+                <col class="col-course">
+                <col class="col-year">
+                <col class="col-batch">
+                <col class="col-status">
+                <col class="col-renewal">
+                <col class="col-payout">
+                <col class="col-actions">
+              </colgroup>
+              <thead>
+                <tr>
+                  <th>Payroll</th>
+                  <th>ID</th>
+                  <th>Name</th>
+                  <th>School</th>
+                  <th>Course</th>
+                  <th>Year</th>
+                  <th>Batch</th>
+                  <th>Status</th>
+                  <th>Renewal Tracked</th>
+                  <th>Prior Payout</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+            </table>
+            <div id="studentRowsScroll" class="clusterize-scroll">
+              <table class="records-table records-table-body">
+                <colgroup>
+                  <col class="col-payroll">
+                  <col class="col-id">
+                  <col class="col-name">
+                  <col class="col-school">
+                  <col class="col-course">
+                  <col class="col-year">
+                  <col class="col-batch">
+                  <col class="col-status">
+                  <col class="col-renewal">
+                  <col class="col-payout">
+                  <col class="col-actions">
+                </colgroup>
+                <tbody id="studentRows" class="clusterize-content"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="view" data-view="users" hidden>
+        <div class="section-header">
+          <div>
+            <p class="eyebrow">Admin</p>
+            <h2>User Management</h2>
+            <p class="hero-note">Create staff accounts, refine display names, rotate passwords, and remove access from one secure admin-only surface.</p>
+          </div>
+        </div>
+        <div class="users-layout" data-admin-only hidden>
+          <form class="panel users-panel" id="userManagementForm">
+            <div class="section-header compact-header">
+              <div>
+                <p class="eyebrow">Create Access</p>
+                <h2>Create Auth User</h2>
+              </div>
+            </div>
+            <p class="helper-text">Create a Firebase Authentication user and assign either the `admin` or `user` role claim.</p>
+            <div class="form-grid">
+              <div class="field-group">
+                <label for="managedUserEmail">Email</label>
+                <input id="managedUserEmail" name="email" type="email" autocomplete="off" required>
+              </div>
+              <div class="field-group">
+                <label for="managedUserPassword">Temporary Password</label>
+                <input id="managedUserPassword" name="password" type="password" autocomplete="new-password" minlength="6" required>
+              </div>
+              <div class="field-group">
+                <label for="managedUserDisplayName">Display Name</label>
+                <input id="managedUserDisplayName" name="displayName" autocomplete="off">
+              </div>
+              <div class="field-group">
+                <label for="managedUserRole">Role</label>
+                <select id="managedUserRole" name="role" required>
+                  <option value="user">User</option>
+                  <option value="admin">Admin</option>
+                </select>
+              </div>
+            </div>
+            <div class="actions">
+              <button class="primary" type="submit">Create User</button>
+            </div>
+          </form>
+
+          <div class="panel users-panel">
+            <div class="section-header compact-header">
+              <div>
+                <p class="eyebrow">Staff Accounts</p>
+                <h2>Managed Users</h2>
+              </div>
+            </div>
+            <p class="helper-text">Use Edit to open a secure modal for display name and password updates. Email addresses stay locked once created.</p>
+            <div class="table-wrap table-elevated">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Email</th>
+                    <th>Role</th>
+                    <th>Status</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="managedUserRows"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="view" data-view="setup" hidden>
+        <div class="section-header">
+          <div>
+            <p class="eyebrow">Setup</p>
+            <h2>Barangays, Schools, And Courses</h2>
+          </div>
+        </div>
+        <div class="setup-stack">
+          <section class="setup-block">
+            <form class="panel" id="barangayForm">
+              <div class="section-header compact-header">
+                <div>
+                  <p class="eyebrow">Location Options</p>
+                  <h2>Barangays</h2>
+                </div>
+              </div>
+              <div class="form-grid">
+                <div class="field-group">
+                  <label for="barangayName">Barangay Name</label>
+                  <input id="barangayName" name="name" required>
+                </div>
+              </div>
+              <div class="actions">
+                <button class="primary" type="submit">Save Barangay</button>
+                <button type="button" id="loadDefaultBarangays">Load Default Barangays</button>
+              </div>
+            </form>
+            <div class="table-wrap table-elevated">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Barangay</th>
+                    <th>Added</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="barangayRows"></tbody>
+              </table>
+            </div>
+          </section>
+
+          <section class="setup-block">
+            <form class="panel" id="schoolForm">
+              <div class="section-header compact-header">
+                <div>
+                  <p class="eyebrow">Education Options</p>
+                  <h2>Schools</h2>
+                </div>
+              </div>
+              <div class="form-grid">
+                <div class="field-group">
+                  <label for="schoolName">School Name</label>
+                  <input id="schoolName" name="name" required>
+                </div>
+              </div>
+              <div class="actions">
+                <button class="primary" type="submit">Save School</button>
+              </div>
+            </form>
+            <div class="table-wrap table-elevated">
+              <table>
+                <thead>
+                  <tr>
+                    <th>School</th>
+                    <th>Added</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="schoolRows"></tbody>
+              </table>
+            </div>
+          </section>
+
+          <section class="setup-block">
+            <form class="panel" id="courseForm">
+              <div class="section-header compact-header">
+                <div>
+                  <p class="eyebrow">Education Options</p>
+                  <h2>Courses</h2>
+                </div>
+              </div>
+              <div class="form-grid">
+                <div class="field-group">
+                  <label for="courseName">Course Name</label>
+                  <input id="courseName" name="name" required>
+                </div>
+              </div>
+              <div class="actions">
+                <button class="primary" type="submit">Save Course</button>
+              </div>
+            </form>
+            <div class="table-wrap table-elevated">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Course</th>
+                    <th>Added</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="courseRows"></tbody>
+              </table>
+            </div>
+          </section>
+
+          <section class="setup-block">
+            <form class="panel" id="batchForm">
+              <div class="section-header compact-header">
+                <div>
+                  <p class="eyebrow">Program Cycle</p>
+                  <h2>Batches</h2>
+                </div>
+              </div>
+              <div class="form-grid">
+                <div class="field-group">
+                  <label for="batchName">Batch Number</label>
+                  <input id="batchName" name="name" required>
+                </div>
+              </div>
+              <div class="actions">
+                <button class="primary" type="submit">Save Batch</button>
+              </div>
+            </form>
+            <div class="table-wrap table-elevated">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Batch</th>
+                    <th>Added</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="batchRows"></tbody>
+              </table>
+            </div>
+          </section>
+        </div>
+      </section>
+
+      <section class="view" data-view="payouts" hidden>
+        <div class="section-header">
+          <div>
+            <p class="eyebrow">Payout History</p>
+            <h2>Payout Records</h2>
+          </div>
+        </div>
+        <div class="filters">
+          <input id="payoutSearch" placeholder="Search student, ID, type, status, school, course">
+          <select id="payoutBatchFilter">
+            <option value="">All batches</option>
+            <option value="1">Batch 1</option>
+            <option value="2">Batch 2</option>
+            <option value="3">Batch 3</option>
+            <option value="4">Batch 4</option>
+            <option value="5">Batch 5</option>
+            <option value="6">Batch 6</option>
+            <option value="7">Batch 7</option>
+            <option value="none">No batch indicated</option>
+          </select>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Student</th>
+                <th>Batch</th>
+                <th>Type</th>
+                <th>Status</th>
+                <th>Amount</th>
+                <th>Notes</th>
+              </tr>
+            </thead>
+            <tbody id="payoutRows"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="view" data-view="exports" hidden>
+        <div class="section-header">
+          <div>
+            <p class="eyebrow">Payroll & Exports</p>
+            <h2>Export Records</h2>
+          </div>
+        </div>
+        <div class="panel">
+          <p>Select any number of students, then generate grouped payroll Word and Excel files in sets of 15.</p>
+          <p class="selection-summary" id="payrollSelectionSummary">0 student(s) selected. Exports will be grouped into sets of 15.</p>
+          <div class="form-grid payroll-meta">
+            <div class="field-group">
+              <label for="payrollDateOfFiling">Date Of Filing</label>
+              <input id="payrollDateOfFiling" name="date_of_filing" type="date" required>
+            </div>
+            <div class="field-group">
+              <label for="payrollSchoolYear">School Year</label>
+              <input id="payrollSchoolYear" name="school_year" placeholder="2025-2026" required>
+            </div>
+            <div class="field-group">
+              <label for="payrollSemester">Semester Number</label>
+              <select id="payrollSemester" name="sem_number" required>
+                <option value="">Select Semester</option>
+                <option value="1">1st Semester</option>
+                <option value="2">2nd Semester</option>
+                <option value="3">3rd Semester</option>
+                <option value="4">4th Semester</option>
+              </select>
+            </div>
+          </div>
+          <div class="filters payroll-filters">
+            <input id="payrollSearch" placeholder="Search name, ID, school, course, batch">
+            <select id="payrollStatusFilter">
+              <option value="">All records</option>
+              <option value="unpayrolled">Not yet payrolled</option>
+              <option value="payrolled">Already payrolled</option>
+              <option value="claimed">Has payout record</option>
+              <option value="incomplete">Incomplete documents</option>
+            </select>
+            <select id="payrollBatchFilter">
+              <option value="">All batches</option>
+              <option value="1">Batch 1</option>
+              <option value="2">Batch 2</option>
+              <option value="3">Batch 3</option>
+              <option value="4">Batch 4</option>
+              <option value="5">Batch 5</option>
+              <option value="6">Batch 6</option>
+              <option value="7">Batch 7</option>
+              <option value="none">No batch indicated</option>
+            </select>
+          </div>
+          <div class="actions">
+            <button type="button" class="primary" id="exportStudents">Export Payroll Files</button>
+            <button type="button" id="selectAllPayroll">Select All Filtered</button>
+            <button type="button" id="clearPayrollSelection">Clear Selection</button>
+            <button type="button" id="exportCsv">Export Filtered CSV</button>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Select</th>
+                <th>ID</th>
+                <th>Name</th>
+                <th>School</th>
+                <th>Course</th>
+                <th>Year</th>
+                <th>Batch</th>
+                <th>Prior Payout</th>
+                <th>Payroll Prepared</th>
+              </tr>
+            </thead>
+            <tbody id="payrollRows"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="view" data-view="trash" hidden>
+        <div class="section-header">
+          <div>
+            <p class="eyebrow">Deleted Records</p>
+            <h2>Trash</h2>
+          </div>
+        </div>
+        <div class="filters">
+          <input id="trashSearch" placeholder="Search name, ID, school, course, batch">
+          <select id="trashBatchFilter">
+            <option value="">All batches</option>
+            <option value="1">Batch 1</option>
+            <option value="2">Batch 2</option>
+            <option value="3">Batch 3</option>
+            <option value="4">Batch 4</option>
+            <option value="5">Batch 5</option>
+            <option value="6">Batch 6</option>
+            <option value="7">Batch 7</option>
+            <option value="none">No batch indicated</option>
+          </select>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Name</th>
+                <th>School</th>
+                <th>Course</th>
+                <th>Batch</th>
+                <th>Deleted</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="trashRows"></tbody>
+          </table>
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <div class="loading-overlay" id="loadingOverlay" aria-live="polite" aria-busy="true" hidden>
+    <div class="loading-indicator" aria-hidden="true"></div>
+    <p id="loadingMessage">Loading records...</p>
+  </div>
+
+  <dialog class="feedback-dialog" id="feedbackDialog" aria-labelledby="feedbackTitle">
+    <div class="feedback-dialog-header">
+      <div>
+        <p class="eyebrow" id="feedbackEyebrow">System Feedback</p>
+        <h2 id="feedbackTitle">Action Complete</h2>
+      </div>
+      <button type="button" class="dialog-close" id="closeFeedbackDialog" aria-label="Close feedback dialog">Close</button>
+    </div>
+    <p id="feedbackMessage"></p>
+    <div class="actions feedback-actions">
+      <button type="button" class="primary" id="confirmFeedbackDialog">OK</button>
+    </div>
+  </dialog>
+
+  <dialog class="details-dialog" id="studentDetailsDialog">
+    <div class="dialog-header">
+      <h2>Student Details</h2>
+      <button type="button" id="closeStudentDetails">Close</button>
+    </div>
+    <div id="studentDetailsBody"></div>
+  </dialog>
+
+  <dialog class="user-dialog" id="managedUserDialog">
+    <form class="user-dialog-shell" id="managedUserUpdateForm" method="dialog">
+      <div class="dialog-header user-dialog-header">
+        <div>
+          <p class="eyebrow">Admin</p>
+          <h2 id="managedUserUpdateTitle">Update Auth User</h2>
+          <p class="helper-text">Change the display name and optionally set a new password. Email stays locked.</p>
+        </div>
+        <button type="button" id="closeManagedUserDialog">Close</button>
+      </div>
+      <input id="managedUserUpdateUid" name="uid" type="hidden">
+      <div class="form-grid">
+        <div class="field-group">
+          <label for="managedUserUpdateEmail">Email</label>
+          <input id="managedUserUpdateEmail" type="email" autocomplete="username" readonly>
+        </div>
+        <div class="field-group">
+          <label for="managedUserUpdateDisplayName">Display Name</label>
+          <input id="managedUserUpdateDisplayName" name="displayName" autocomplete="off">
+        </div>
+        <div class="field-group">
+          <label for="managedUserUpdatePassword">New Password</label>
+          <input id="managedUserUpdatePassword" name="password" type="password" autocomplete="new-password" minlength="6" placeholder="Leave blank to keep current password">
+        </div>
+      </div>
+      <div class="actions">
+        <button class="primary" type="submit" id="managedUserUpdateSubmit">Save User Updates</button>
+        <button type="button" id="cancelManagedUserUpdate">Cancel</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="https://cdn.jsdelivr.net/npm/clusterize.js@1.0.0/clusterize.min.js"></script>
+  <script type="module" src="./js/app.js?v=user-trash-gate-20260526"></script>
+</body>
+</html>

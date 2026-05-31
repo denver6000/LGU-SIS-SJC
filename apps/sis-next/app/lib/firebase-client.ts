@@ -1,8 +1,14 @@
 "use client";
 
 import { getApp, getApps, initializeApp } from "firebase/app";
-import { getAuth } from "firebase/auth";
-import { getFirestore } from "firebase/firestore";
+import { connectAuthEmulator, getAuth } from "firebase/auth";
+import { connectFirestoreEmulator, getFirestore } from "firebase/firestore";
+import {
+  FIREBASE_AUTH_EMULATOR_PORT,
+  FIREBASE_EMULATOR_HOST,
+  FIRESTORE_EMULATOR_PORT,
+  isDevAppEnv
+} from "./shared/app-env";
 
 function requiredEnv(name: string, value: string | undefined) {
   if (!value) {
@@ -24,3 +30,26 @@ const firebaseConfig = {
 export const firebaseApp = getApps().length ? getApp() : initializeApp(firebaseConfig);
 export const firebaseAuth = getAuth(firebaseApp);
 export const firebaseDb = getFirestore(firebaseApp);
+
+let authEmulatorConnected = false;
+let firestoreEmulatorConnected = false;
+
+if (isDevAppEnv()) {
+  if (!authEmulatorConnected) {
+    connectAuthEmulator(
+      firebaseAuth,
+      `http://${FIREBASE_EMULATOR_HOST}:${FIREBASE_AUTH_EMULATOR_PORT}`,
+      { disableWarnings: true }
+    );
+    authEmulatorConnected = true;
+  }
+
+  if (!firestoreEmulatorConnected) {
+    connectFirestoreEmulator(
+      firebaseDb,
+      FIREBASE_EMULATOR_HOST,
+      FIRESTORE_EMULATOR_PORT
+    );
+    firestoreEmulatorConnected = true;
+  }
+}

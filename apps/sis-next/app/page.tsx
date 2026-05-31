@@ -1,10 +1,6 @@
-import { AppShell } from "./app-shell";
-import { AuthGuard } from "./auth-guard";
+import { redirect } from "next/navigation";
+import { routeForView } from "./lib/shared/views";
 
 export default function HomePage() {
-  return (
-    <AuthGuard>
-      <AppShell />
-    </AuthGuard>
-  );
+  redirect(routeForView("dashboard"));
 }

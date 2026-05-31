@@ -12,6 +12,7 @@ node_modules/
 .next/
 apps/*/.next/
 apps/*/next-dev.log
+apps/*/.next-logs/
 .vercel/
 .turbo/
 __pycache__/

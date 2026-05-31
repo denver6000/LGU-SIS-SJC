@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { FormEvent, useState } from "react";
 import { signInWithEmailAndPassword } from "firebase/auth";
 import { GraduationCap, LockKeyhole, Mail } from "lucide-react";
@@ -9,6 +10,7 @@ import { useAuth } from "../auth-provider";
 
 export default function LoginPage() {
   const { refreshSession, user } = useAuth();
+  const router = useRouter();
   const [message, setMessage] = useState(user ? "You are already signed in." : "Enter your Firebase account.");
   const [isBusy, setIsBusy] = useState(false);
 
@@ -44,8 +46,10 @@ export default function LoginPage() {
       }
 
       await refreshSession();
-      setMessage("Signed in. Continue when you are ready.");
+      setMessage("Signed in. Opening the application...");
       formElement.reset();
+      router.push("/");
+      router.refresh();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Sign in failed.");
     } finally {

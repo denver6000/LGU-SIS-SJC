@@ -13,15 +13,17 @@ service cloud.firestore {
       );
     }
 
-    function isUser() {
+    function isEncoder() {
       return signedIn() && (
+        request.auth.token.role == 'encoder' ||
+        request.auth.token.encoder == true ||
         request.auth.token.role == 'user' ||
         request.auth.token.user == true
       );
     }
 
     function isAppUser() {
-      return isAdmin() || isUser();
+      return isAdmin() || isEncoder();
     }
 
     match /students/{studentId} {

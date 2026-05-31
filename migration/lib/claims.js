@@ -64,8 +64,36 @@ async function setCustomClaim(email, key, value) {
   }));
 }
 
+async function createUserWithAdminClaims(email, password) {
+  const auth = getAuth();
+  
+  // Create user
+  const userRecord = await auth.createUser({
+    email: email.trim(),
+    password: password.trim(),
+    emailVerified: false
+  });
+  
+  // Set admin claims
+  await auth.setCustomUserClaims(userRecord.uid, {
+    admin: true,
+    role: "admin"
+  });
+  
+  return {
+    email: userRecord.email,
+    uid: userRecord.uid,
+    before: {},
+    after: {
+      admin: true,
+      role: "admin"
+    }
+  };
+}
+
 module.exports = {
   addAdminCustomClaims,
   removeAdminCustomClaims,
-  setCustomClaim
+  setCustomClaim,
+  createUserWithAdminClaims
 };

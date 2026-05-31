@@ -1,19 +1,9 @@
 "use client";
 
 import { createContext, useContext, useEffect, useState } from "react";
-import { signOut } from "firebase/auth";
+import { onIdTokenChanged, signOut } from "firebase/auth";
 import { firebaseAuth } from "./lib/firebase-client";
-
-export type SessionUser = {
-  uid: string;
-  email: string;
-  name: string;
-  role: string;
-  claims: {
-    admin: boolean;
-    role: string | null;
-  };
-};
+import type { SessionUser } from "./lib/shared/user";
 
 type AuthContextValue = {
   user: SessionUser | null;
@@ -24,9 +14,15 @@ type AuthContextValue = {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
-export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [user, setUser] = useState<SessionUser | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+export function AuthProvider({
+  children,
+  initialUser = null
+}: {
+  children: React.ReactNode;
+  initialUser?: SessionUser | null;
+}) {
+  const [user, setUser] = useState<SessionUser | null>(initialUser);
+  const [isLoading, setIsLoading] = useState(!initialUser);
 
   async function refreshSession() {
     setIsLoading(true);
@@ -52,7 +48,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }
 
   useEffect(() => {
-    refreshSession();
+    if (!initialUser) {
+      refreshSession();
+      return;
+    }
+
+    setIsLoading(false);
+  }, [initialUser]);
+
+  useEffect(() => {
+    return onIdTokenChanged(firebaseAuth, async (nextUser) => {
+      if (!nextUser) return;
+
+      const idToken = await nextUser.getIdToken();
+      await fetch("/api/auth/session", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ idToken })
+      }).catch(() => undefined);
+    });
   }, []);
 
   return (

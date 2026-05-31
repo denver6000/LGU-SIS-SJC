@@ -11,7 +11,9 @@
   "scripts": {
     "add_admin_custom_claims": "node ./bin/add_admin_custom_claims.js",
     "remove_admin_custom_claims": "node ./bin/remove_admin_custom_claims.js",
-    "set_custom_claim": "node ./bin/set_custom_claim.js"
+    "set_custom_claim": "node ./bin/set_custom_claim.js",
+    "create_admin_user": "node ./bin/create_admin_user.js",
+    "emulator:set-admin-claims": "node ./bin/emulator_set_admin_claims.js"
   },
   "keywords": [],
   "author": "",

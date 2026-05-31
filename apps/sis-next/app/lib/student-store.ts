@@ -1,54 +1,114 @@
 "use client";
 
-import { collection, getDocs } from "firebase/firestore";
-import { firebaseDb } from "./firebase-client";
+export {
+  createManagedUser,
+  createStudent,
+  deleteOption,
+  deleteManagedUser,
+  deleteSchoolCourse,
+  deleteTrashStudent,
+  getPayoutRecords,
+  getOptions,
+  getSchoolCourses,
+  getStudents,
+  getTrash,
+  importBatchWorkbookOptions,
+  listManagedUsers,
+  moveStudentToTrash,
+  restoreStudent,
+  savePayoutRecord,
+  saveOption,
+  saveSchoolCourse,
+  seedFirestoreFromBundledJson,
+  updateManagedUser,
+  updateStudent
+} from "./client/api-client";
 
-export type Student = {
-  student_id: string;
-  full_name: string;
-  school_address?: string;
-  school_course?: string;
-  year_level?: string;
-  batch?: string;
-  phone_number?: string;
-  status?: string;
-  claimed?: boolean;
-  renewed?: boolean;
-  payrolled?: boolean;
-  created_at?: string;
-  claimed_at?: string;
-};
+export type { AppInitialData } from "./client/api-client";
+export type { PayoutRecord } from "./shared/payout-record";
+export type { Student } from "./shared/student";
 
-const COLLECTIONS = {
-  students: "students",
-  trash: "trash"
-};
+import {
+  createStudent,
+  deleteOption,
+  getOptions,
+  getPayoutRecords,
+  getStudents,
+  saveOption,
+  savePayoutRecord,
+  seedFirestoreFromBundledJson
+} from "./client/api-client";
 
-async function getCollectionRows<T>(collectionName: string) {
-  const snapshot = await getDocs(collection(firebaseDb, collectionName));
-  return snapshot.docs.map((docSnap) => ({ ...docSnap.data(), _docId: docSnap.id })) as T[];
+export function storageMode() {
+  return "Firestore via Next.js API";
 }
 
-async function getSeedRows<T>(url: string) {
-  const response = await fetch(url);
-  if (!response.ok) throw new Error(`Unable to load ${url}.`);
-  return response.json() as Promise<T[]>;
+export const saveStudent = createStudent;
+
+export function optionIdFromName(name: string) {
+  return String(name || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
 }
 
-export async function getStudents() {
-  try {
-    const rows = await getCollectionRows<Student>(COLLECTIONS.students);
-    return rows.length ? rows : getSeedRows<Student>("/data/student_data.seed.json");
-  } catch {
-    return getSeedRows<Student>("/data/student_data.seed.json");
+export const getBarangays = () => getOptions("barangays");
+export const getSchools = () => getOptions("schools");
+export const getCourses = () => getOptions("courses");
+export const getBatches = () => getOptions("batches");
+
+export const saveBarangay = (input: { id?: string; name?: string } | string) =>
+  saveOption("barangays", typeof input === "string" ? { id: optionIdFromName(input), name: input } : input);
+
+export const saveSchool = (input: { id?: string; name?: string } | string) =>
+  saveOption("schools", typeof input === "string" ? { id: optionIdFromName(input), name: input } : input);
+
+export const saveCourse = (input: { id?: string; name?: string } | string) =>
+  saveOption("courses", typeof input === "string" ? { id: optionIdFromName(input), name: input } : input);
+
+export const saveBatch = (input: { id?: string; name?: string } | string) =>
+  saveOption("batches", typeof input === "string" ? { id: optionIdFromName(input), name: input } : input);
+
+export const deleteBarangay = (id: string) => deleteOption("barangays", id);
+export const deleteSchool = (id: string) => deleteOption("schools", id);
+export const deleteCourse = (id: string) => deleteOption("courses", id);
+export const deleteBatch = (id: string) => deleteOption("batches", id);
+
+export async function seedLocalFromBundledJson() {
+  return seedFirestoreFromBundledJson();
+}
+
+export async function backfillPayoutRecordsFromLegacyStudents() {
+  const [students, payoutRecords] = await Promise.all([getStudents(), getPayoutRecords()]);
+  const existingKeys = new Set(
+    payoutRecords.map((record) => `${String(record.student_id || "").trim()}:${String(record.type || "").trim()}`)
+  );
+
+  let created = 0;
+
+  for (const student of students) {
+    const studentId = String(student.student_id || "").trim();
+    if (!studentId) continue;
+
+    if (student.claimed && !existingKeys.has(`${studentId}:subsidy_claim`)) {
+      await savePayoutRecord({
+        student_id: studentId,
+        student_name: student.full_name,
+        student_number: student.student_number,
+        school: student.school_address,
+        course: student.school_course,
+        year_level: student.year_level,
+        batch: student.batch,
+        type: "subsidy_claim",
+        status: "recorded",
+        amount: 5000,
+        notes: "Backfilled from claimed student flag."
+      });
+      existingKeys.add(`${studentId}:subsidy_claim`);
+      created += 1;
+    }
   }
-}
 
-export async function getTrash() {
-  try {
-    const rows = await getCollectionRows<Student>(COLLECTIONS.trash);
-    return rows.length ? rows : getSeedRows<Student>("/data/trash_data.seed.json");
-  } catch {
-    return getSeedRows<Student>("/data/trash_data.seed.json");
-  }
+  return { created };
 }

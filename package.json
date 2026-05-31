@@ -5,9 +5,12 @@
   "description": "Root static server for the Student Information System Firebase site.",
   "scripts": {
     "serve": "serve public --listen 4173 --single",
-    "dev": "npm run serve"
+    "dev": "npm run serve",
+    "emulators": "npm --prefix functions run build && firebase emulators:start --project lgus-sjc-scholarship --import=./emulator-data/local-suite --export-on-exit=./emulator-data/local-suite",
+    "emulators:ui": "firebase emulators:start --only ui --project lgus-sjc-scholarship"
   },
   "devDependencies": {
+    "firebase-tools": "^14.10.0",
     "serve": "^14.2.4"
   }
 }
