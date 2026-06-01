@@ -42,9 +42,11 @@ export function AuthProvider({
   }
 
   async function signOutUser() {
+    setIsLoading(true);
     await fetch("/api/auth/session", { method: "DELETE" });
     await signOut(firebaseAuth);
     setUser(null);
+    setIsLoading(false);
   }
 
   useEffect(() => {

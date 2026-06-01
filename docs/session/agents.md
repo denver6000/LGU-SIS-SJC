@@ -4,6 +4,10 @@ Last updated: 2026-06-01
 
 This document records implementation history, architecture choices, bug context, and working directives from the `public/` static SIS migration into `apps/sis-next/`. Treat it as project memory for future agents and human reviewers.
 
+Related architecture notes:
+
+- [Renewal Cycle Architecture](./renewal-cycle-architecture.md): recommended model for school-year/semester renewals, cycle membership, `is_active`, and payroll linkage.
+
 ## Current Product Shape
 
 The active app is `apps/sis-next`, a Next.js App Router application replacing the legacy static `public/` app. The legacy static app remains useful as behavior reference, especially `public/js/store.js` and route HTML pages, but new user-facing SIS work should land in `apps/sis-next`.

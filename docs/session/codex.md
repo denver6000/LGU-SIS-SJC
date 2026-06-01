@@ -4,6 +4,8 @@ Last updated: 2026-06-01
 
 Use this as a directive when continuing this project as Codex. The main session memory is in `docs/session/agents.md`; this file highlights the decisions most likely to matter during implementation.
 
+Read `docs/session/renewal-cycle-architecture.md` before changing Renewal or Payrolls. It records the recommended cycle-based model for school-year/semester renewals, `is_active`, and payroll linkage.
+
 ## Working Style For This Repo
 
 Read before editing. This project changed rapidly during migration, and `apps/sis-next/app/app-shell.tsx` carries a lot of behavior. Use `rg` and focused reads before touching it.

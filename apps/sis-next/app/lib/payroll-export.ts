@@ -19,6 +19,12 @@ type PayrollStudent = {
   claimed?: boolean;
 };
 
+export type PayrollExportMetadata = {
+  date_of_filing: string;
+  school_year: string;
+  sem_number: string;
+};
+
 const PAYROLL_WORD_TEMPLATE_URL = "/templates/PAYROLL_WORD_TEMPLATE.docx";
 const PAYROLL_EXCEL_TEMPLATE_URL = "/templates/PAYROLL_TEMPLATE.xlsx";
 const DOCX_MIME_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
@@ -181,7 +187,7 @@ function fillPayrollExcelSheetXml(sheetXml: string, students: PayrollStudent[], 
   return xml;
 }
 
-async function buildPayrollWordBlob(students: PayrollStudent[]) {
+async function buildPayrollWordBlob(students: PayrollStudent[], metadata: PayrollExportMetadata) {
   const response = await fetch(PAYROLL_WORD_TEMPLATE_URL);
   if (!response.ok) {
     throw new Error(`Unable to load Word template: ${response.status} ${response.statusText}`);
@@ -193,7 +199,7 @@ async function buildPayrollWordBlob(students: PayrollStudent[]) {
     linebreaks: true
   });
 
-  doc.render(buildPayrollWordData(students));
+  doc.render(buildPayrollWordData(students, metadata));
 
   return doc.getZip().generate({
     type: "blob",
@@ -222,7 +228,11 @@ async function buildPayrollExcelBlob(students: PayrollStudent[], sheetNumber: nu
   });
 }
 
-export async function exportPayrollFiles(students: PayrollStudent[], filenamePrefix = "payroll") {
+export async function exportPayrollFiles(
+  students: PayrollStudent[],
+  metadata: PayrollExportMetadata,
+  filenamePrefix = "payroll"
+) {
   if (!students.length) {
     throw new Error("Select at least one student before exporting payroll files.");
   }
@@ -233,7 +243,7 @@ export async function exportPayrollFiles(students: PayrollStudent[], filenamePre
   for (const [index, group] of groups.entries()) {
     const part = String(index + 1).padStart(2, "0");
     const [wordBlob, excelBlob] = await Promise.all([
-      buildPayrollWordBlob(group),
+      buildPayrollWordBlob(group, metadata),
       buildPayrollExcelBlob(group, index + 1, groups.length)
     ]);
 

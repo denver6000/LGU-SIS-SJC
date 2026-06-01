@@ -2,17 +2,27 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import { signInWithEmailAndPassword } from "firebase/auth";
 import { GraduationCap, LockKeyhole, Mail } from "lucide-react";
 import { firebaseAuth } from "../lib/firebase-client";
 import { useAuth } from "../auth-provider";
+
+const SIGNED_OUT_MESSAGE_KEY = "sis-next:signed-out-message";
 
 export default function LoginPage() {
   const { refreshSession, user } = useAuth();
   const router = useRouter();
   const [message, setMessage] = useState(user ? "You are already signed in." : "Enter your Firebase account.");
   const [isBusy, setIsBusy] = useState(false);
+
+  useEffect(() => {
+    const signedOutMessage = window.sessionStorage.getItem(SIGNED_OUT_MESSAGE_KEY);
+    if (!signedOutMessage) return;
+
+    setMessage("Signed out successfully.");
+    window.sessionStorage.removeItem(SIGNED_OUT_MESSAGE_KEY);
+  }, []);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -101,6 +111,18 @@ export default function LoginPage() {
           </div>
         </form>
       </section>
+
+      {isBusy ? (
+        <div className="modal-backdrop" role="presentation">
+          <div className="auth-progress-dialog" role="dialog" aria-modal="true" aria-labelledby="login-progress-title">
+            <div className="auth-progress-spinner" aria-hidden="true" />
+            <div className="auth-progress-copy">
+              <h2 id="login-progress-title">Signing you in</h2>
+              <p>Please wait while we prepare your session.</p>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </main>
   );
 }

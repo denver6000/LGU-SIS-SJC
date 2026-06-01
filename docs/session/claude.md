@@ -4,6 +4,8 @@ Last updated: 2026-06-01
 
 This file is for Claude or any assistant continuing the SIS migration. The canonical architecture/session memory is `docs/session/agents.md`. Follow these directives to avoid undoing important decisions.
 
+Before changing Renewal or Payrolls, read `docs/session/renewal-cycle-architecture.md`. It records the planned cycle-based model for school-year/semester renewals, `is_active`, renewal limits, and payroll linkage.
+
 ## High-Level Context
 
 The project is migrating a legacy static Firebase SIS in `public/` into a Next.js App Router app in `apps/sis-next`.

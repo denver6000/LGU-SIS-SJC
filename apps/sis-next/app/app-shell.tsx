@@ -40,6 +40,7 @@ import {
   type Student
 } from "./lib/student-store";
 import type { OptionRecord } from "./lib/shared/options";
+import type { PayrollExportMetadata } from "./lib/payroll-export";
 
 type OptionCollectionName = "barangays" | "schools" | "courses" | "batches";
 
@@ -85,6 +86,8 @@ type ManagedUserDraft = {
   displayName: string;
   role: string;
 };
+
+type PayrollMetadataDraft = PayrollExportMetadata;
 
 const navIcons: Record<AppViewName, React.ComponentType<{ size?: number }>> = {
   dashboard: LayoutDashboard,
@@ -143,6 +146,14 @@ function emptyManagedUserDraft(): ManagedUserDraft {
     password: "",
     displayName: "",
     role: "encoder"
+  };
+}
+
+function emptyPayrollMetadataDraft(): PayrollMetadataDraft {
+  return {
+    date_of_filing: "",
+    school_year: "",
+    sem_number: ""
   };
 }
 
@@ -267,9 +278,11 @@ export function AppShell({
   const router = useRouter();
   const currentUser = user || initialData.user;
   const isAdmin = isAdminUser(currentUser);
+  const signedOutMessageKey = "sis-next:signed-out-message";
 
   const [activeView, setActiveView] = useState<AppViewName>(initialView);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [isSigningOut, setIsSigningOut] = useState(false);
   const [students, setStudents] = useState<Student[]>(initialData.students);
   const [trash, setTrash] = useState<Student[]>(initialData.trash);
   const [payoutRecords, setPayoutRecords] = useState<PayoutRecord[]>(initialData.payoutRecords);
@@ -285,7 +298,10 @@ export function AppShell({
   const [managedUserEditId, setManagedUserEditId] = useState<string | null>(null);
   const [selectedPayrollIds, setSelectedPayrollIds] = useState<Set<string>>(() => new Set());
   const [payrollTab, setPayrollTab] = useState<"unpayrolled" | "renewed">("unpayrolled");
+  const [payrollMetadataDraft, setPayrollMetadataDraft] = useState<PayrollMetadataDraft>(() => emptyPayrollMetadataDraft());
   const [payrollHistoryStudentId, setPayrollHistoryStudentId] = useState("");
+  const [payrollHistoryQuery, setPayrollHistoryQuery] = useState("");
+  const [payrollHistoryMenuOpen, setPayrollHistoryMenuOpen] = useState(false);
   const [actionsStudentId, setActionsStudentId] = useState("");
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
@@ -407,10 +423,42 @@ export function AppShell({
     () => students.find((student) => student.student_id === payrollHistoryStudentId) || null,
     [payrollHistoryStudentId, students]
   );
+  const payrollHistorySearchResults = useMemo(() => {
+    const query = payrollHistoryQuery.trim().toLocaleLowerCase();
+    const sortedStudents = students
+      .slice()
+      .sort((left, right) => left.full_name.localeCompare(right.full_name, undefined, { sensitivity: "base" }));
+
+    if (!query) {
+      return sortedStudents.slice(0, 10);
+    }
+
+    return sortedStudents
+      .filter((student) =>
+        [
+          student.full_name,
+          student.student_id,
+          student.student_number,
+          student.school_address,
+          student.school_course,
+          student.batch
+        ]
+          .join(" ")
+          .toLocaleLowerCase()
+          .includes(query)
+      )
+      .slice(0, 12);
+  }, [payrollHistoryQuery, students]);
   const actionsStudent = useMemo(
     () => students.find((student) => student.student_id === actionsStudentId) || null,
     [actionsStudentId, students]
   );
+
+  useEffect(() => {
+    if (!selectedPayrollHistoryStudent) return;
+    setPayrollHistoryQuery(`${selectedPayrollHistoryStudent.full_name} (${selectedPayrollHistoryStudent.student_id})`);
+  }, [selectedPayrollHistoryStudent]);
+
   const payrollSummaryByStudent = useMemo(() => {
     const summary = new Map<string, { count: number; amount: number; latestCreatedAt: string }>();
     for (const record of payoutRecords) {
@@ -480,8 +528,33 @@ export function AppShell({
     router.push(routeForView(view));
   }
 
+  async function handleSignOut() {
+    if (isSigningOut) return;
+
+    setIsSigningOut(true);
+
+    try {
+      await signOutUser();
+      window.sessionStorage.setItem(signedOutMessageKey, "1");
+      window.location.reload();
+    } catch (error) {
+      setIsSigningOut(false);
+      showNotice(error instanceof Error ? error.message : "Unable to sign out right now.", "error");
+    }
+  }
+
   function patchStudentDraft(student: Partial<StudentDraft>) {
     setStudentDraft((current) => ({ ...current, ...student }));
+  }
+
+  function patchPayrollMetadataDraft(metadata: Partial<PayrollMetadataDraft>) {
+    setPayrollMetadataDraft((current) => ({ ...current, ...metadata }));
+  }
+
+  function selectPayrollHistoryStudent(student: Student) {
+    setPayrollHistoryStudentId(student.student_id);
+    setPayrollHistoryQuery(`${student.full_name} (${student.student_id})`);
+    setPayrollHistoryMenuOpen(false);
   }
 
   function fillStudentDraft(student: Student) {
@@ -703,6 +776,15 @@ export function AppShell({
       return;
     }
 
+    if (
+      !payrollMetadataDraft.date_of_filing.trim() ||
+      !payrollMetadataDraft.school_year.trim() ||
+      !payrollMetadataDraft.sem_number.trim()
+    ) {
+      showNotice("Enter the date of filing, school year, and semester number before creating payroll files.", "error");
+      return;
+    }
+
     try {
       const payrollId = `payroll-${new Date().toISOString().slice(0, 10)}-${Date.now()}`;
       const createdAt = new Date().toISOString();
@@ -712,7 +794,7 @@ export function AppShell({
         ? "Created from No Payrolled Students. Student was marked renewed and payrolled."
         : "Created from Renewed Students. Student was marked payrolled.";
       const groupCount = await withBusy("export-payroll", async () => {
-        const exportedGroupCount = await exportPayrollFiles(selectedPayrollRows, payrollId);
+        const exportedGroupCount = await exportPayrollFiles(selectedPayrollRows, payrollMetadataDraft, payrollId);
         const [createdRecords, updatedStudents] = await Promise.all([
           Promise.all(
             selectedPayrollRows.map((student) =>
@@ -920,19 +1002,56 @@ export function AppShell({
                   : "Select a student to review payroll traces written during payroll creation."
               }
             >
-              <div className="inline-form">
-                <select value={payrollHistoryStudentId} onChange={(event) => setPayrollHistoryStudentId(event.currentTarget.value)}>
-                  <option value="">Select student</option>
-                  {students
-                    .slice()
-                    .sort((left, right) => left.full_name.localeCompare(right.full_name, undefined, { sensitivity: "base" }))
-                    .map((student) => (
-                      <option key={student.student_id} value={student.student_id}>
-                        {student.full_name} ({student.student_id})
-                      </option>
-                    ))}
-                </select>
-                <button type="button" className="secondary-button" onClick={() => setPayrollHistoryStudentId("")}>
+              <div className="inline-form payroll-history-controls">
+                <div className="search-select">
+                  <input
+                    type="search"
+                    value={payrollHistoryQuery}
+                    placeholder="Search student name, ID, number, school, course, batch"
+                    onFocus={() => setPayrollHistoryMenuOpen(true)}
+                    onBlur={() => {
+                      window.setTimeout(() => setPayrollHistoryMenuOpen(false), 120);
+                    }}
+                    onChange={(event) => {
+                      setPayrollHistoryQuery(event.currentTarget.value);
+                      setPayrollHistoryStudentId("");
+                      setPayrollHistoryMenuOpen(true);
+                    }}
+                  />
+                  {payrollHistoryMenuOpen ? (
+                    <div className="search-select-menu" role="listbox" aria-label="Payroll history students">
+                      {payrollHistorySearchResults.length ? (
+                        payrollHistorySearchResults.map((student) => (
+                          <button
+                            key={student.student_id}
+                            type="button"
+                            className="search-select-option"
+                            onMouseDown={(event) => event.preventDefault()}
+                            onClick={() => selectPayrollHistoryStudent(student)}
+                          >
+                            <strong>{student.full_name}</strong>
+                            <span>
+                              {student.student_id}
+                              {student.batch ? ` • Batch ${student.batch}` : ""}
+                              {student.school_course ? ` • ${student.school_course}` : ""}
+                            </span>
+                          </button>
+                        ))
+                      ) : (
+                        <div className="search-select-empty">No students matched that search.</div>
+                      )}
+                    </div>
+                  ) : null}
+                </div>
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={() => {
+                    setPayrollHistoryStudentId("");
+                    setPayrollHistoryQuery("");
+                    setPayrollHistoryMenuOpen(false);
+                  }}
+                >
                   Clear
                 </button>
               </div>
@@ -1232,6 +1351,34 @@ export function AppShell({
                 </div>
               }
             >
+              <div className="form-grid payroll-metadata-grid">
+                <Field label="Date Of Filing">
+                  <input
+                    type="date"
+                    value={payrollMetadataDraft.date_of_filing}
+                    onChange={(event) => patchPayrollMetadataDraft({ date_of_filing: event.currentTarget.value })}
+                  />
+                </Field>
+                <Field label="School Year">
+                  <input
+                    value={payrollMetadataDraft.school_year}
+                    onChange={(event) => patchPayrollMetadataDraft({ school_year: event.currentTarget.value })}
+                    placeholder="2025-2026"
+                  />
+                </Field>
+                <Field label="Semester Number">
+                  <select
+                    value={payrollMetadataDraft.sem_number}
+                    onChange={(event) => patchPayrollMetadataDraft({ sem_number: event.currentTarget.value })}
+                  >
+                    <option value="">Select semester</option>
+                    <option value="1">1st Semester</option>
+                    <option value="2">2nd Semester</option>
+                    <option value="3">3rd Semester</option>
+                    <option value="4">4th Semester</option>
+                  </select>
+                </Field>
+              </div>
               <DataTable
                 columns={[
                   {
@@ -1345,9 +1492,9 @@ export function AppShell({
           })}
         </nav>
 
-        <button type="button" className="rail-signout" onClick={signOutUser}>
+        <button type="button" className="rail-signout" onClick={handleSignOut} disabled={isSigningOut}>
           <LogOut size={18} />
-          <span>Sign Out</span>
+          <span>{isSigningOut ? "Signing Out..." : "Sign Out"}</span>
         </button>
       </aside>
 
@@ -1439,6 +1586,30 @@ export function AppShell({
                   Move To Trash
                 </button>
               ) : null}
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {isSigningOut ? (
+        <div className="modal-backdrop" role="presentation">
+          <div className="auth-progress-dialog" role="dialog" aria-modal="true" aria-labelledby="signout-progress-title">
+            <div className="auth-progress-spinner" aria-hidden="true" />
+            <div className="auth-progress-copy">
+              <h2 id="signout-progress-title">Signing you out</h2>
+              <p>Please wait while we close your session and refresh the page.</p>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {busyKey === "export-payroll" ? (
+        <div className="modal-backdrop" role="presentation">
+          <div className="auth-progress-dialog" role="dialog" aria-modal="true" aria-labelledby="payroll-progress-title">
+            <div className="auth-progress-spinner" aria-hidden="true" />
+            <div className="auth-progress-copy">
+              <h2 id="payroll-progress-title">Creating payroll files</h2>
+              <p>Please wait while we generate the payroll documents and prepare the download.</p>
             </div>
           </div>
         </div>

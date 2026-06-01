@@ -1,0 +1,4 @@
+Ready condition status changed to False for Service lgu-scholarship-backend with message: The user-provided container failed to start and listen on the port defined provided by the PORT=8080 environment variable within the allocated timeout. This can happen when the container port is misconfigured or if the timeout is too short. The health check timeout can be extended. Logs for this revision might contain more information.
+
+Logs URL: https://console.cloud.google.com/logs/viewer?project=lgus-sjc-scholarship&resource=cloud_run_revision/service_name/lgu-scholarship-backend/revision_name/lgu-scholarship-backend-build-2026-05-31-001&advancedFilter=resource.type%3D%22cloud_run_revision%22%0Aresource.labels.service_name%3D%22lgu-scholarship-backend%22%0Aresource.labels.revision_name%3D%22lgu-scholarship-backend-build-2026-05-31-001%22 
+For more troubleshooting guidance, see https://cloud.google.com/run/docs/troubleshooting#container-failed-to-start
