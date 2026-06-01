@@ -6,7 +6,9 @@
     "dev": "next dev",
     "build": "next build",
     "postbuild": "node scripts/ensure-standalone-next.mjs",
-    "start": "node server.mjs"
+    "start": "node server.mjs",
+    "start:prod-local": "node scripts/start-prod-local.mjs",
+    "prod:local": "npm run build && npm run start:prod-local"
   },
   "dependencies": {
     "@tanstack/react-virtual": "^3.13.24",
