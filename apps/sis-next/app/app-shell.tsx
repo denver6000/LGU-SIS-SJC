@@ -246,6 +246,10 @@ function renewalHistoryCount(student: Student) {
   return student.renewal_history?.filter((entry) => entry.status === "renewed").length || 0;
 }
 
+function isInRenewalScope(student: Student) {
+  return Boolean(student.claimed || student.renewed || student.renewal_history?.length);
+}
+
 function downloadTextFile(filename: string, mimeType: string, content: string) {
   const blob = new Blob([content], { type: mimeType });
   const url = URL.createObjectURL(blob);
@@ -438,7 +442,7 @@ export function AppShell({
   }, [batchFilter, search, statusFilter, students]);
 
   const renewalRows = useMemo(
-    () => students.filter((student) => student.claimed).sort((left, right) => left.full_name.localeCompare(right.full_name)),
+    () => students.filter(isInRenewalScope).sort((left, right) => left.full_name.localeCompare(right.full_name)),
     [students]
   );
 
@@ -1100,7 +1104,7 @@ export function AppShell({
         return (
           <div className="content-stack">
             <SectionHeader eyebrow="Renewal" title="Renewal Tracking" description="Track prior claimants and mark renewal progress without leaving the table." />
-            <Surface title="Renewal Queue" subtitle={`${renewalRows.length} claimed students are in renewal scope.`}>
+            <Surface title="Renewal Queue" subtitle={`${renewalRows.length} students have renewal scope or renewal history.`}>
               <DataTable
                 columns={[
                   { key: "id", label: "ID", render: (student) => student.student_id },
