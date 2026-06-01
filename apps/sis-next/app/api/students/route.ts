@@ -15,9 +15,9 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
-    await requireAdminForApi();
+    const user = await requireAdminForApi();
     const body = (await request.json()) as { student?: StudentInput };
-    const student = await createStudent(body.student || {});
+    const student = await createStudent(body.student || {}, user);
     return Response.json({ student }, { status: 201 });
   } catch (error) {
     return jsonError(error);

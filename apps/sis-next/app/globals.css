@@ -839,7 +839,7 @@ table {
 
 .action-dialog-summary {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 1px;
   background: var(--line);
   border-bottom: 1px solid var(--line);
@@ -862,6 +862,84 @@ table {
 .action-dialog-summary strong {
   color: var(--text);
   font-size: 0.95rem;
+}
+
+.dialog-history-panel {
+  display: grid;
+  gap: 12px;
+  padding: 18px;
+  border-bottom: 1px solid var(--line);
+}
+
+.dialog-history-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.dialog-history-header span {
+  color: var(--text-faint);
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.dialog-history-header strong {
+  min-width: 28px;
+  min-height: 28px;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-alt);
+  color: var(--text);
+  font-size: 0.86rem;
+}
+
+.history-list {
+  display: grid;
+  gap: 8px;
+}
+
+.history-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(150px, auto);
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-alt);
+}
+
+.history-row div {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.history-row div:last-child {
+  justify-items: end;
+  text-align: right;
+}
+
+.history-row strong {
+  color: var(--text);
+  font-size: 0.92rem;
+}
+
+.history-row span,
+.empty-history {
+  color: var(--text-soft);
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.empty-history {
+  padding: 12px;
+  border: 1px dashed var(--line-strong);
+  border-radius: 8px;
+  background: var(--surface-alt);
 }
 
 .dialog-action-grid {
@@ -1131,9 +1209,16 @@ table {
   .form-grid,
   .document-grid,
   .split-panels,
+  .action-dialog-summary,
+  .history-row,
   .filter-strip,
   .inline-form {
     grid-template-columns: 1fr;
+  }
+
+  .history-row div:last-child {
+    justify-items: start;
+    text-align: left;
   }
 
   .surface-header,

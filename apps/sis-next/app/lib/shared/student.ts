@@ -1,3 +1,20 @@
+export type StudentYearLevelHistoryEntry = {
+  from_year_level: string;
+  to_year_level: string;
+  changed_at: string;
+  changed_by_uid?: string;
+  changed_by_email?: string;
+  reason?: string;
+};
+
+export type StudentRenewalHistoryEntry = {
+  status: "renewed" | "pending";
+  changed_at: string;
+  changed_by_uid?: string;
+  changed_by_email?: string;
+  reason?: string;
+};
+
 export type Student = {
   student_id: string;
   full_name: string;
@@ -8,6 +25,7 @@ export type Student = {
   phone_number?: string;
   school_course?: string;
   year_level?: string;
+  year_level_history?: StudentYearLevelHistoryEntry[];
   batch?: string;
   certificate_of_residency?: boolean;
   pagpapatunay_form?: boolean;
@@ -20,6 +38,7 @@ export type Student = {
   claimed_at?: string;
   renewed?: boolean;
   renewed_at?: string;
+  renewal_history?: StudentRenewalHistoryEntry[];
   payrolled?: boolean;
   payrolled_at?: string;
   migration_source?: string;

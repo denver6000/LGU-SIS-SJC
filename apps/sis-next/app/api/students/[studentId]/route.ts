@@ -11,10 +11,10 @@ export async function PATCH(
   context: { params: Promise<{ studentId: string }> }
 ) {
   try {
-    await requireAdminForApi();
+    const user = await requireAdminForApi();
     const { studentId } = await context.params;
     const body = (await request.json()) as { student?: StudentInput };
-    const student = await updateStudent(assertString(studentId, "Student ID"), body.student || {});
+    const student = await updateStudent(assertString(studentId, "Student ID"), body.student || {}, user);
     return Response.json({ student });
   } catch (error) {
     return jsonError(error);

@@ -9,8 +9,8 @@ This note records the recommended implementation model for scholarship renewals,
 The current app has historical fields such as `student.renewed` and `student.payrolled`. Those fields are convenient for display, but they become inaccurate once renewal is understood as a recurring process:
 
 - a student can renew in Semester 1 and Semester 2 of the same school year
-- a student should not renew more than twice per school year
-- a student should not renew more than once per semester
+- scholarship offices may treat renewals as a twice-per-school-year process, but this app should not hard-enforce that limit yet
+- admins need enough renewal history to decide whether another renewal is valid for the real-world case in front of them
 - a student's year level can change across school years
 - payroll generation must be tied to a specific cycle and document event
 
@@ -77,6 +77,16 @@ students/{studentId} = {
 
 Keep the master record focused on identity and stable details. Avoid using it as the source of truth for time-bound renewal status.
 
+Current implementation note:
+
+- `students/{studentId}` now keeps a lightweight `year_level_history` array.
+- New student creation records the initial year level when present.
+- Admin edits append a history entry only when `year_level` actually changes.
+- Entries include `from_year_level`, `to_year_level`, `changed_at`, `changed_by_uid`, `changed_by_email`, and `reason`.
+- This audit trail is surfaced in the Records student action/info dialog.
+
+This is a practical bridge toward the fuller cycle model. In the future, per-cycle year level should live on `cycles/{cycleKey}/studentCycles/{studentId}`, but the current student-level history remains useful as an audit trail for pre-cycle migration edits.
+
 ## Cycle Membership
 
 ```ts
@@ -130,15 +140,23 @@ renewalRecords/{renewalId} = {
 }
 ```
 
-Renewal records are the source of truth for renewal history and limit enforcement.
+Renewal records are the source of truth for renewal history and decision support.
 
-Backend constraints:
+Backend constraints once the office formalizes cycle policy:
 
 - maximum one renewal record per `student_id + cycle_key`
-- maximum two renewal records per `student_id + school_year`
 - do not allow renewal creation when the current cycle is locked or archived
 
-The backend must enforce these rules. The UI may warn early, but it is not the authority.
+The backend should not enforce a maximum number of renewals per school year or semester until the office explicitly requests that policy. The UI should show prior renewals clearly so admins can make the decision.
+
+Current implementation note:
+
+- `students/{studentId}` now keeps a lightweight `renewal_history` array.
+- Renewal history entries are appended when `renewed` changes between pending and renewed.
+- Entries include `status`, `changed_at`, `changed_by_uid`, `changed_by_email`, and `reason`.
+- Payroll creation that marks a student renewed also appends renewal history.
+- The Records table shows the number of renewed history entries, and the Record Actions dialog shows the full renewal timeline.
+- There is intentionally no two-renewal hard limit in the current implementation.
 
 ## Payroll Linkage
 

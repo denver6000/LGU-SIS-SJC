@@ -223,6 +223,29 @@ function csvCell(value: unknown) {
   return `"${String(value ?? "").replaceAll('"', '""')}"`;
 }
 
+function formatDateTime(value?: string) {
+  if (!value) return "None";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    timeZoneName: "short"
+  });
+}
+
+function yearLevelLabel(value?: string) {
+  return String(value || "").trim() || "Not set";
+}
+
+function renewalHistoryCount(student: Student) {
+  return student.renewal_history?.filter((entry) => entry.status === "renewed").length || 0;
+}
+
 function downloadTextFile(filename: string, mimeType: string, content: string) {
   const blob = new Blob([content], { type: mimeType });
   const url = URL.createObjectURL(blob);
@@ -968,6 +991,11 @@ export function AppShell({
                   { key: "batch", label: "Batch", render: (student) => student.batch || "—" },
                   { key: "completion", label: "Documents", render: (student) => completionStatus(student) },
                   {
+                    key: "renewals",
+                    label: "Renewals",
+                    render: (student) => renewalHistoryCount(student)
+                  },
+                  {
                     key: "payrolls",
                     label: "Payrolls",
                     render: (student) => {
@@ -1057,12 +1085,10 @@ export function AppShell({
               </div>
               <DataTable
                 columns={[
-                  { key: "created", label: "Created", render: (record) => record.created_at ? new Date(record.created_at).toLocaleString() : "—" },
+                  { key: "created", label: "Created", render: (record) => formatDateTime(record.created_at) },
                   { key: "payroll", label: "Payroll", render: (record) => record.payroll_id || record.id },
-                  { key: "type", label: "Type", render: (record) => record.type || "payroll" },
                   { key: "batch", label: "Batch", render: (record) => record.batch || "—" },
-                  { key: "amount", label: "Amount", render: (record) => Number(record.amount || 0).toLocaleString() },
-                  { key: "notes", label: "Notes", render: (record) => record.notes || "—" }
+                  { key: "amount", label: "Amount", render: (record) => Number(record.amount || 0).toLocaleString() }
                 ]}
                 rows={payrollHistoryRows}
                 getRowKey={(record) => record.id}
@@ -1537,8 +1563,16 @@ export function AppShell({
             </div>
             <div className="action-dialog-summary">
               <div>
+                <span>Year Level</span>
+                <strong>{yearLevelLabel(actionsStudent.year_level)}</strong>
+              </div>
+              <div>
                 <span>Payrolls</span>
                 <strong>{payrollSummaryByStudent.get(actionsStudent.student_id)?.count || 0}</strong>
+              </div>
+              <div>
+                <span>Renewals</span>
+                <strong>{renewalHistoryCount(actionsStudent)}</strong>
               </div>
               <div>
                 <span>Total Amount</span>
@@ -1547,11 +1581,65 @@ export function AppShell({
               <div>
                 <span>Latest</span>
                 <strong>
-                  {payrollSummaryByStudent.get(actionsStudent.student_id)?.latestCreatedAt
-                    ? new Date(payrollSummaryByStudent.get(actionsStudent.student_id)?.latestCreatedAt || "").toLocaleDateString()
-                    : "None"}
+                  {formatDateTime(payrollSummaryByStudent.get(actionsStudent.student_id)?.latestCreatedAt)}
                 </strong>
               </div>
+            </div>
+            <div className="dialog-history-panel">
+              <div className="dialog-history-header">
+                <span>Year Level History</span>
+                <strong>{actionsStudent.year_level_history?.length || 0}</strong>
+              </div>
+              {actionsStudent.year_level_history?.length ? (
+                <div className="history-list">
+                  {actionsStudent.year_level_history
+                    .slice()
+                    .sort((left, right) => String(right.changed_at || "").localeCompare(String(left.changed_at || "")))
+                    .map((entry, index) => (
+                      <div key={`${entry.changed_at}-${index}`} className="history-row">
+                        <div>
+                          <strong>
+                            {yearLevelLabel(entry.from_year_level)} to {yearLevelLabel(entry.to_year_level)}
+                          </strong>
+                          <span>{entry.reason || "Year level updated."}</span>
+                        </div>
+                        <div>
+                          <span>{formatDateTime(entry.changed_at)}</span>
+                          <span>{entry.changed_by_email || "Unknown user"}</span>
+                        </div>
+                      </div>
+                    ))}
+                </div>
+              ) : (
+                <div className="empty-history">No year-level changes have been recorded yet.</div>
+              )}
+            </div>
+            <div className="dialog-history-panel">
+              <div className="dialog-history-header">
+                <span>Renewal History</span>
+                <strong>{actionsStudent.renewal_history?.length || 0}</strong>
+              </div>
+              {actionsStudent.renewal_history?.length ? (
+                <div className="history-list">
+                  {actionsStudent.renewal_history
+                    .slice()
+                    .sort((left, right) => String(right.changed_at || "").localeCompare(String(left.changed_at || "")))
+                    .map((entry, index) => (
+                      <div key={`${entry.changed_at}-${entry.status}-${index}`} className="history-row">
+                        <div>
+                          <strong>{entry.status === "renewed" ? "Marked renewed" : "Moved to pending"}</strong>
+                          <span>{entry.reason || "Renewal state updated."}</span>
+                        </div>
+                        <div>
+                          <span>{formatDateTime(entry.changed_at)}</span>
+                          <span>{entry.changed_by_email || "Unknown user"}</span>
+                        </div>
+                      </div>
+                    ))}
+                </div>
+              ) : (
+                <div className="empty-history">No renewal changes have been recorded yet.</div>
+              )}
             </div>
             <div className="dialog-action-grid">
               <button
