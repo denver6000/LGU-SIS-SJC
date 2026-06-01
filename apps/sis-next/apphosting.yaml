@@ -5,8 +5,13 @@ runConfig:
   cpu: 1
   memoryMiB: 512
 scripts:
-  runCommand: npm run start
+  runCommand: node .next/standalone/server.js
 env:
+  - variable: APP_ENV
+    value: "production"
+    availability:
+      - BUILD
+      - RUNTIME
   - variable: NEXT_PUBLIC_FIREBASE_API_KEY
     value: "AIzaSyBVKHZM21GXb-3ycPCcD9xGh6CclFVmGUQ"
     availability:
