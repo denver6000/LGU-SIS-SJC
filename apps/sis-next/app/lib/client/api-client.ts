@@ -1,6 +1,8 @@
 "use client";
 
 import type { OptionRecord, SchoolCourseRecord } from "../shared/options";
+import type { CurrentCycleConfig } from "../shared/current-cycle";
+import type { OperationLog, OperationLogInput } from "../shared/operation-log";
 import type { PayoutRecord, PayoutRecordInput } from "../shared/payout-record";
 import type { Student, StudentInput } from "../shared/student";
 import type { ManagedUser, SessionUser } from "../shared/user";
@@ -29,9 +31,11 @@ async function request<T>(input: RequestInfo | URL, init?: RequestInit) {
 
 export type AppInitialData = {
   user: SessionUser;
+  currentCycle: CurrentCycleConfig;
   students: Student[];
   trash: Student[];
   payoutRecords: PayoutRecord[];
+  operationLogs: OperationLog[];
   options: {
     barangays: OptionRecord[];
     schools: OptionRecord[];
@@ -40,6 +44,21 @@ export type AppInitialData = {
     schoolCourses: SchoolCourseRecord[];
   };
 };
+
+export function getCurrentCycleConfig() {
+  return request<{ currentCycle: CurrentCycleConfig }>("/api/system-config/current-cycle").then((data) => data.currentCycle);
+}
+
+export function saveCurrentCycleConfig(input: {
+  school_year: string;
+  sem_number: number;
+  status: CurrentCycleConfig["status"];
+}) {
+  return request<{ currentCycle: CurrentCycleConfig }>("/api/system-config/current-cycle", {
+    method: "PATCH",
+    body: JSON.stringify({ currentCycle: input })
+  }).then((data) => data.currentCycle);
+}
 
 export function getStudents() {
   return request<{ students: Student[] }>("/api/students").then((data) => data.students);
@@ -90,6 +109,17 @@ export function savePayoutRecord(record: PayoutRecordInput) {
     method: "POST",
     body: JSON.stringify({ payoutRecord: record })
   }).then((data) => data.payoutRecord);
+}
+
+export function getOperationLogs() {
+  return request<{ operationLogs: OperationLog[] }>("/api/operation-logs").then((data) => data.operationLogs);
+}
+
+export function saveOperationLog(operationLog: OperationLogInput) {
+  return request<{ operationLog: OperationLog }>("/api/operation-logs", {
+    method: "POST",
+    body: JSON.stringify({ operationLog })
+  }).then((data) => data.operationLog);
 }
 
 export function listManagedUsers() {

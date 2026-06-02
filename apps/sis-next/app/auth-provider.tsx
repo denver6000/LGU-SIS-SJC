@@ -14,6 +14,11 @@ type AuthContextValue = {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
+function isFirebaseNetworkError(error: unknown) {
+  if (!error || typeof error !== "object") return false;
+  return (error as { code?: string }).code === "auth/network-request-failed";
+}
+
 export function AuthProvider({
   children,
   initialUser = null
@@ -36,6 +41,8 @@ export function AuthProvider({
       }
       const data = (await response.json()) as { user: SessionUser | null };
       setUser(data.user);
+    } catch {
+      setUser(null);
     } finally {
       setIsLoading(false);
     }
@@ -43,10 +50,13 @@ export function AuthProvider({
 
   async function signOutUser() {
     setIsLoading(true);
-    await fetch("/api/auth/session", { method: "DELETE" });
-    await signOut(firebaseAuth);
-    setUser(null);
-    setIsLoading(false);
+    try {
+      await fetch("/api/auth/session", { method: "DELETE" }).catch(() => undefined);
+      await signOut(firebaseAuth);
+      setUser(null);
+    } finally {
+      setIsLoading(false);
+    }
   }
 
   useEffect(() => {
@@ -62,14 +72,20 @@ export function AuthProvider({
     return onIdTokenChanged(firebaseAuth, async (nextUser) => {
       if (!nextUser) return;
 
-      const idToken = await nextUser.getIdToken();
-      await fetch("/api/auth/session", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({ idToken })
-      }).catch(() => undefined);
+      try {
+        const idToken = await nextUser.getIdToken();
+        await fetch("/api/auth/session", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({ idToken })
+        }).catch(() => undefined);
+      } catch (error) {
+        if (!isFirebaseNetworkError(error)) {
+          console.error("Unable to refresh Firebase session token.", error);
+        }
+      }
     });
   }, []);
 

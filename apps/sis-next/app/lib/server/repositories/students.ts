@@ -1,6 +1,12 @@
 import "server-only";
 
+import { REQUIREMENT_KEYS, RENEWAL_REQUIREMENT_KEYS } from "../../shared/student";
 import type {
+  StudentRequirementKey,
+  StudentRequirementMap,
+  StudentRenewalRequirementKey,
+  StudentRenewalRequirementMap,
+  StudentSemesterRecord,
   Student,
   StudentInput,
   StudentRenewalHistoryEntry,
@@ -9,12 +15,136 @@ import type {
 import { COLLECTIONS } from "../../shared/collections";
 import { getAdminDb } from "../firebase-admin";
 import { HttpError } from "../../shared/http";
+import { isAdminRole } from "../../shared/roles";
 import type { SessionUser } from "../../shared/user";
 
 const db = getAdminDb();
 
 function normalizeBoolean(value: unknown) {
   return value === true;
+}
+
+function emptyRequirementMap(): StudentRequirementMap {
+  return {
+    certificate_of_residency: false,
+    pagpapatunay_form: false,
+    picture_of_the_house: false,
+    good_moral_certificate: false,
+    original_certificate_of_grades: false,
+    proof_of_enrollment: false
+  };
+}
+
+function normalizeRequirementMap(
+  requirementSource: unknown,
+  legacySource: Partial<Record<StudentRequirementKey, unknown>> = {}
+): StudentRequirementMap {
+  const requirementMap = emptyRequirementMap();
+  const requirements =
+    requirementSource && typeof requirementSource === "object"
+      ? (requirementSource as Partial<Record<StudentRequirementKey, unknown>>)
+      : {};
+
+  for (const key of REQUIREMENT_KEYS) {
+    requirementMap[key] = normalizeBoolean(requirements[key] ?? legacySource[key]);
+  }
+
+  return requirementMap;
+}
+
+function emptyRenewalRequirementMap(): StudentRenewalRequirementMap {
+  return {
+    liquidation: false,
+    proof_of_enrollment: false,
+    latest_grades: false
+  };
+}
+
+function normalizeRenewalRequirementMap(
+  value: unknown,
+  legacySource: Partial<Record<StudentRenewalRequirementKey, unknown>> = {}
+): StudentRenewalRequirementMap {
+  const requirements = emptyRenewalRequirementMap();
+  const source =
+    value && typeof value === "object"
+      ? (value as Partial<Record<StudentRenewalRequirementKey, unknown>>)
+      : {};
+
+  for (const key of RENEWAL_REQUIREMENT_KEYS) {
+    requirements[key] = normalizeBoolean(source[key] ?? legacySource[key]);
+  }
+
+  return requirements;
+}
+
+function requirementMapComplete(requirements: StudentRequirementMap) {
+  return REQUIREMENT_KEYS.every((key) => requirements[key]);
+}
+
+function renewalRequirementMapComplete(requirements: StudentRenewalRequirementMap) {
+  return RENEWAL_REQUIREMENT_KEYS.every((key) => requirements[key]);
+}
+
+function normalizePayoutType(value: unknown, renewalRequirements: StudentRenewalRequirementMap) {
+  if (value === "initial" || value === "renewal") return value;
+  return RENEWAL_REQUIREMENT_KEYS.some((key) => renewalRequirements[key]) ? "renewal" : "initial";
+}
+
+function normalizeSemesterRecords(value: unknown, fallbackInitialRequirements: StudentRequirementMap = emptyRequirementMap()): StudentSemesterRecord[] {
+  if (!Array.isArray(value)) return [];
+
+  return value.reduce<StudentSemesterRecord[]>((records, entry) => {
+    if (!entry || typeof entry !== "object") return records;
+    const record = entry as Partial<StudentSemesterRecord>;
+    const schoolYear = String(record.school_year ?? "").trim();
+    const semNumberRaw = Number(record.sem_number ?? 0);
+    const cycleKey = String(record.cycle_key ?? "").trim();
+
+    if (!schoolYear || !Number.isFinite(semNumberRaw) || semNumberRaw <= 0 || !cycleKey) return records;
+    const initialPayoutRequirements = normalizeRequirementMap(
+      record.initial_payout_requirements,
+      fallbackInitialRequirements
+    );
+    const renewalRequirements = normalizeRenewalRequirementMap(record.renewal_requirements ?? record.requirements);
+    const payoutType = normalizePayoutType(record.payout_type, renewalRequirements);
+    const legacyRenewalStatus =
+      record.renewal_status === "renewed" || record.renewal_status === "payrolled"
+        ? record.renewal_status
+        : "pending";
+    const payrollStatus =
+      record.payroll_status === "payrolled" || legacyRenewalStatus === "payrolled"
+        ? "payrolled"
+        : record.payroll_status === "qualified" ||
+            legacyRenewalStatus === "renewed" ||
+            (payoutType === "initial"
+              ? requirementMapComplete(initialPayoutRequirements)
+              : renewalRequirementMapComplete(renewalRequirements))
+          ? "qualified"
+          : "not_qualified";
+
+    records.push({
+      school_year: schoolYear,
+      sem_number: semNumberRaw,
+      cycle_key: cycleKey,
+      payout_type: payoutType,
+      payroll_status: payrollStatus,
+      renewal_status: legacyRenewalStatus,
+      payroll_id: String(record.payroll_id ?? "").trim(),
+      payroll_record_type: String(record.payroll_record_type ?? "").trim(),
+      payrolled_at: String(record.payrolled_at ?? "").trim(),
+      payrolled_by_uid: String(record.payrolled_by_uid ?? "").trim(),
+      payrolled_by_email: String(record.payrolled_by_email ?? "").trim(),
+      initial_payout_requirements: initialPayoutRequirements,
+      renewal_requirements: renewalRequirements,
+      requirements: renewalRequirements,
+      created_at: String(record.created_at ?? record.updated_at ?? new Date().toISOString()).trim(),
+      updated_at: String(record.updated_at ?? record.created_at ?? new Date().toISOString()).trim(),
+      updated_by_uid: String(record.updated_by_uid ?? "").trim(),
+      updated_by_email: String(record.updated_by_email ?? "").trim(),
+      notes: String(record.notes ?? "").trim()
+    });
+    return records;
+  }, []);
 }
 
 function normalizeYearLevelHistory(value: unknown): StudentYearLevelHistoryEntry[] {
@@ -54,6 +184,11 @@ function normalizeRenewalHistory(value: unknown): StudentRenewalHistoryEntry[] {
     entries.push({
       status,
       changed_at: changedAt,
+      school_year: String(record.school_year ?? "").trim(),
+      sem_number: Number.isFinite(Number(record.sem_number ?? 0)) ? Number(record.sem_number ?? 0) : undefined,
+      cycle_key: String(record.cycle_key ?? "").trim(),
+      requirements_snapshot: normalizeRequirementMap(record.requirements_snapshot),
+      renewal_requirements_snapshot: normalizeRenewalRequirementMap(record.renewal_requirements_snapshot),
       changed_by_uid: String(record.changed_by_uid ?? "").trim(),
       changed_by_email: String(record.changed_by_email ?? "").trim(),
       reason: String(record.reason ?? "").trim()
@@ -89,20 +224,78 @@ function buildRenewalHistoryEntry({
   renewed,
   actor,
   changedAt,
-  reason
+  reason,
+  requirementsSnapshot,
+  schoolYear,
+  semNumber,
+  cycleKey,
+  renewalRequirementsSnapshot
 }: {
   renewed: boolean;
   actor?: SessionUser | null;
   changedAt: string;
   reason: string;
+  requirementsSnapshot: StudentRequirementMap;
+  schoolYear?: string;
+  semNumber?: number;
+  cycleKey?: string;
+  renewalRequirementsSnapshot?: StudentRenewalRequirementMap;
 }): StudentRenewalHistoryEntry {
   return {
     status: renewed ? "renewed" : "pending",
     changed_at: changedAt,
+    school_year: String(schoolYear ?? "").trim(),
+    sem_number: semNumber,
+    cycle_key: String(cycleKey ?? "").trim(),
+    requirements_snapshot: requirementsSnapshot,
+    renewal_requirements_snapshot: renewalRequirementsSnapshot ?? emptyRenewalRequirementMap(),
     changed_by_uid: actor?.uid || "",
     changed_by_email: actor?.email || "",
     reason
   };
+}
+
+function canMutatePayrollState(actor?: SessionUser | null) {
+  return actor?.claims.admin === true || isAdminRole(actor?.claims.role);
+}
+
+function preservePayrollFieldsForEncoder(input: StudentInput, existing: Student): StudentInput {
+  const sanitized: StudentInput = { ...input };
+  delete sanitized.renewed;
+  delete sanitized.renewed_at;
+  delete sanitized.payrolled;
+  delete sanitized.payrolled_at;
+
+  if (Array.isArray(input.semester_records)) {
+    const existingByCycle = new Map(
+      normalizeSemesterRecords(existing.semester_records, existing.requirements).map((record) => [record.cycle_key, record])
+    );
+
+    sanitized.semester_records = input.semester_records.map((record) => {
+      const existingRecord = existingByCycle.get(record.cycle_key);
+      if (!existingRecord) {
+        const { payroll_id, payroll_record_type, payrolled_at, payrolled_by_uid, payrolled_by_email, ...nextRecord } = record;
+        return {
+          ...nextRecord,
+          payroll_status: record.payroll_status === "payrolled" ? "not_qualified" : record.payroll_status,
+          renewal_status: record.renewal_status === "payrolled" ? "pending" : record.renewal_status
+        };
+      }
+
+      return {
+        ...record,
+        payroll_status: existingRecord.payroll_status,
+        renewal_status: existingRecord.renewal_status,
+        payroll_id: existingRecord.payroll_id,
+        payroll_record_type: existingRecord.payroll_record_type,
+        payrolled_at: existingRecord.payrolled_at,
+        payrolled_by_uid: existingRecord.payrolled_by_uid,
+        payrolled_by_email: existingRecord.payrolled_by_email
+      };
+    });
+  }
+
+  return sanitized;
 }
 
 export function normalizeStudentRecord(
@@ -113,6 +306,14 @@ export function normalizeStudentRecord(
   const renewalHistory = normalizeRenewalHistory(renewalHistorySource);
   const renewed = normalizeBoolean(overrides.renewed ?? input.renewed);
   const renewedAt = String(overrides.renewed_at ?? input.renewed_at ?? "").trim();
+  const requirements = normalizeRequirementMap(overrides.requirements ?? input.requirements, {
+    certificate_of_residency: overrides.certificate_of_residency ?? input.certificate_of_residency,
+    pagpapatunay_form: overrides.pagpapatunay_form ?? input.pagpapatunay_form,
+    picture_of_the_house: overrides.picture_of_the_house ?? input.picture_of_the_house,
+    good_moral_certificate: overrides.good_moral_certificate ?? input.good_moral_certificate,
+    original_certificate_of_grades: overrides.original_certificate_of_grades ?? input.original_certificate_of_grades,
+    proof_of_enrollment: overrides.proof_of_enrollment ?? input.proof_of_enrollment
+  });
 
   return {
     student_id: String(overrides.student_id ?? input.student_id ?? "").trim(),
@@ -126,13 +327,14 @@ export function normalizeStudentRecord(
     year_level: String(overrides.year_level ?? input.year_level ?? "").trim(),
     year_level_history: normalizeYearLevelHistory(overrides.year_level_history ?? input.year_level_history),
     batch: String(overrides.batch ?? input.batch ?? "").trim(),
-    certificate_of_residency: normalizeBoolean(overrides.certificate_of_residency ?? input.certificate_of_residency),
-    pagpapatunay_form: normalizeBoolean(overrides.pagpapatunay_form ?? input.pagpapatunay_form),
-    picture_of_the_house: normalizeBoolean(overrides.picture_of_the_house ?? input.picture_of_the_house),
-    good_moral_certificate: normalizeBoolean(overrides.good_moral_certificate ?? input.good_moral_certificate),
-    original_certificate_of_grades: normalizeBoolean(overrides.original_certificate_of_grades ?? input.original_certificate_of_grades),
-    proof_of_enrollment: normalizeBoolean(overrides.proof_of_enrollment ?? input.proof_of_enrollment),
-    school_id: normalizeBoolean(overrides.school_id ?? input.school_id),
+    requirements,
+    semester_records: normalizeSemesterRecords(overrides.semester_records ?? input.semester_records, requirements),
+    certificate_of_residency: requirements.certificate_of_residency,
+    pagpapatunay_form: requirements.pagpapatunay_form,
+    picture_of_the_house: requirements.picture_of_the_house,
+    good_moral_certificate: requirements.good_moral_certificate,
+    original_certificate_of_grades: requirements.original_certificate_of_grades,
+    proof_of_enrollment: requirements.proof_of_enrollment,
     claimed: normalizeBoolean(overrides.claimed ?? input.claimed),
     renewed,
     payrolled: normalizeBoolean(overrides.payrolled ?? input.payrolled),
@@ -145,6 +347,11 @@ export function normalizeStudentRecord(
             {
               status: "renewed",
               changed_at: renewedAt || String(overrides.created_at ?? input.created_at ?? new Date().toISOString()).trim(),
+              school_year: "",
+              sem_number: undefined,
+              cycle_key: "",
+              requirements_snapshot: requirements,
+              renewal_requirements_snapshot: emptyRenewalRequirementMap(),
               changed_by_uid: "",
               changed_by_email: "",
               reason: "Legacy renewed state inferred from the student record."
@@ -187,10 +394,21 @@ export async function nextStudentId() {
 }
 
 export async function createStudent(input: StudentInput, actor?: SessionUser | null) {
-  const studentId = String(input.student_id ?? "").trim() || await nextStudentId();
-  const createdAt = input.created_at || new Date().toISOString();
-  const yearLevel = String(input.year_level ?? "").trim();
-  const student = normalizeStudentRecord(input, {
+  const sanitizedInput = canMutatePayrollState(actor)
+    ? input
+    : preservePayrollFieldsForEncoder(input, normalizeStudentRecord({}));
+  const studentId = String(sanitizedInput.student_id ?? "").trim() || await nextStudentId();
+  const createdAt = sanitizedInput.created_at || new Date().toISOString();
+  const yearLevel = String(sanitizedInput.year_level ?? "").trim();
+  const initialRequirementSnapshot = normalizeRequirementMap(sanitizedInput.requirements, {
+    certificate_of_residency: sanitizedInput.certificate_of_residency,
+    pagpapatunay_form: sanitizedInput.pagpapatunay_form,
+    picture_of_the_house: sanitizedInput.picture_of_the_house,
+    good_moral_certificate: sanitizedInput.good_moral_certificate,
+    original_certificate_of_grades: sanitizedInput.original_certificate_of_grades,
+    proof_of_enrollment: sanitizedInput.proof_of_enrollment
+  });
+  const student = normalizeStudentRecord(sanitizedInput, {
     student_id: studentId,
     created_at: createdAt,
     year_level_history: yearLevel
@@ -204,13 +422,14 @@ export async function createStudent(input: StudentInput, actor?: SessionUser | n
           })
         ]
       : [],
-    renewal_history: input.renewed
+    renewal_history: sanitizedInput.renewed
       ? [
           buildRenewalHistoryEntry({
             renewed: true,
             actor,
             changedAt: createdAt,
-            reason: "Initial renewal state recorded when the student was created."
+            reason: "Initial renewal state recorded when the student was created.",
+            requirementsSnapshot: initialRequirementSnapshot
           })
         ]
       : [],
@@ -232,9 +451,10 @@ export async function updateStudent(studentId: string, input: StudentInput, acto
     }
 
     const existing = normalizeStudentRecord(snapshot.data() as Student, { student_id: studentId });
-    const nextStudent = normalizeStudentRecord({ ...existing, ...input }, {
+    const sanitizedInput = canMutatePayrollState(actor) ? input : preservePayrollFieldsForEncoder(input, existing);
+    const nextStudent = normalizeStudentRecord({ ...existing, ...sanitizedInput }, {
       student_id: studentId,
-      created_at: existing.created_at || input.created_at || new Date().toISOString(),
+      created_at: existing.created_at || sanitizedInput.created_at || new Date().toISOString(),
       deleted_at: ""
     });
 
@@ -253,16 +473,25 @@ export async function updateStudent(studentId: string, input: StudentInput, acto
       ];
     }
 
-    if (Object.prototype.hasOwnProperty.call(input, "renewed") && existing.renewed !== nextStudent.renewed) {
+    if (Object.prototype.hasOwnProperty.call(sanitizedInput, "renewed") && existing.renewed !== nextStudent.renewed) {
+      const latestSemesterRecord = normalizeSemesterRecords(sanitizedInput.semester_records ?? nextStudent.semester_records, nextStudent.requirements)
+        .slice()
+        .sort((left, right) => String(right.updated_at || "").localeCompare(String(left.updated_at || "")))[0];
+
       nextStudent.renewal_history = [
         ...normalizeRenewalHistory(existing.renewal_history),
         buildRenewalHistoryEntry({
           renewed: Boolean(nextStudent.renewed),
           actor,
           changedAt: new Date().toISOString(),
+          schoolYear: latestSemesterRecord?.school_year,
+          semNumber: latestSemesterRecord?.sem_number,
+          cycleKey: latestSemesterRecord?.cycle_key,
           reason: nextStudent.renewed
             ? "Student was marked renewed. Renewal count is informational and not limit-enforced."
-            : "Student was moved back to pending renewal."
+            : "Student was moved back to pending renewal.",
+          requirementsSnapshot: nextStudent.requirements || emptyRequirementMap(),
+          renewalRequirementsSnapshot: latestSemesterRecord?.renewal_requirements || latestSemesterRecord?.requirements || emptyRenewalRequirementMap()
         })
       ];
     }

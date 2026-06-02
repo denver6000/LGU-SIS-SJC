@@ -2,6 +2,7 @@
 
 import {
   ClipboardList,
+  ListChecks,
   FileDown,
   LayoutDashboard,
   LogOut,
@@ -14,8 +15,8 @@ import {
   UserRoundPlus,
   X
 } from "lucide-react";
-import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { usePathname, useRouter } from "next/navigation";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "./auth-provider";
 import { exportPayrollFiles } from "./lib/payroll-export";
 import { APP_VIEWS, isAdminOnlyView, labelForView, routeForView, type AppViewName } from "./lib/shared/views";
@@ -25,22 +26,39 @@ import {
   deleteManagedUser,
   deleteOption,
   deleteTrashStudent,
+  getCurrentCycleConfig,
   getOptions,
   getStudents,
   getTrash,
   listManagedUsers,
   moveStudentToTrash,
   restoreStudent,
+  saveCurrentCycleConfig,
   saveOption,
+  saveOperationLog,
   savePayoutRecord,
   updateManagedUser,
   updateStudent,
   type AppInitialData,
+  type OperationLog,
   type PayoutRecord,
   type Student
 } from "./lib/student-store";
+import { cycleKeyFor, type CurrentCycleConfig } from "./lib/shared/current-cycle";
 import type { OptionRecord } from "./lib/shared/options";
+import type { OperationLogInput } from "./lib/shared/operation-log";
 import type { PayrollExportMetadata } from "./lib/payroll-export";
+import {
+  REQUIREMENT_KEYS,
+  REQUIREMENT_LABELS,
+  RENEWAL_REQUIREMENT_KEYS,
+  RENEWAL_REQUIREMENT_LABELS,
+  type StudentRequirementKey,
+  type StudentRequirementMap,
+  type StudentRenewalRequirementKey,
+  type StudentRenewalRequirementMap,
+  type StudentSemesterRecord
+} from "./lib/shared/student";
 
 type OptionCollectionName = "barangays" | "schools" | "courses" | "batches";
 
@@ -70,13 +88,7 @@ type StudentDraft = {
   school_course: string;
   year_level: string;
   batch: string;
-  certificate_of_residency: boolean;
-  pagpapatunay_form: boolean;
-  picture_of_the_house: boolean;
-  good_moral_certificate: boolean;
-  original_certificate_of_grades: boolean;
-  proof_of_enrollment: boolean;
-  school_id: boolean;
+  requirements: StudentRequirementMap;
 };
 
 type ManagedUserDraft = {
@@ -87,12 +99,79 @@ type ManagedUserDraft = {
   role: string;
 };
 
+type CurrentCycleDraft = {
+  school_year: string;
+  sem_number: string;
+  status: CurrentCycleConfig["status"];
+};
+
+type RenewalRecordDraft = {
+  payout_type: StudentSemesterRecord["payout_type"];
+  initial_payout_requirements: StudentRequirementMap;
+  renewal_requirements: StudentRenewalRequirementMap;
+  notes: string;
+};
+
 type PayrollMetadataDraft = PayrollExportMetadata;
+type RequirementsTab = "non-payrolled" | "payrolled";
+type PayrollTab = "new" | "renewal";
+type ConfirmationRequest = {
+  title: string;
+  message: string;
+  confirmLabel?: string;
+  danger?: boolean;
+  resolve: (confirmed: boolean) => void;
+};
+
+type ValidationDialogRequest = {
+  title: string;
+  message: string;
+  fields: string[];
+  acknowledgeLabel?: string;
+};
+
+const adminRecordStatusFilters = new Set(["renewed", "unrenewed", "payrolled", "unpayrolled"]);
+
+type PersistedShellState = {
+  version: 3;
+  catalogCollection: OptionCollectionName;
+  catalogDraftName: string;
+  catalogEditId: string | null;
+  studentDraft: StudentDraft;
+  studentEditId: string | null;
+  managedUserDraft: ManagedUserDraft;
+  managedUserEditId: string | null;
+  currentCycleDraft: CurrentCycleDraft;
+  renewalRecordStudentId: string;
+  renewalRecordCycle: CurrentCycleConfig | null;
+  renewalRecordDraft: RenewalRecordDraft;
+  requirementsSchoolYear: string;
+  requirementsSemester: string;
+  requirementsTab: RequirementsTab;
+  requirementsNameFilter: string;
+  requirementsSchoolFilter: string;
+  requirementsBarangayFilter: string;
+  selectedPayrollIds: string[];
+  payrollTab: PayrollTab;
+  payrollSchoolYear: string;
+  payrollSemester: string;
+  payrollNameFilter: string;
+  payrollSchoolFilter: string;
+  payrollStatusFilter: string;
+  payrollBatchFilter: string;
+  payrollMetadataDraft: PayrollMetadataDraft;
+  payrollHistoryStudentId: string;
+  payrollHistoryQuery: string;
+  search: string;
+  statusFilter: string;
+  batchFilter: string;
+};
 
 const navIcons: Record<AppViewName, React.ComponentType<{ size?: number }>> = {
   dashboard: LayoutDashboard,
   catalogs: SlidersHorizontal,
   register: UserRoundPlus,
+  requirements: ListChecks,
   renewal: Repeat2,
   records: ClipboardList,
   users: ShieldUser,
@@ -100,15 +179,8 @@ const navIcons: Record<AppViewName, React.ComponentType<{ size?: number }>> = {
   trash: Trash2
 };
 
-const documentFields = [
-  "certificate_of_residency",
-  "pagpapatunay_form",
-  "picture_of_the_house",
-  "good_moral_certificate",
-  "original_certificate_of_grades",
-  "proof_of_enrollment",
-  "school_id"
-] as const;
+const requirementFields = REQUIREMENT_KEYS;
+const renewalRequirementFields = RENEWAL_REQUIREMENT_KEYS;
 
 const catalogDefinitions: Array<{ collection: OptionCollectionName; label: string; singular: string }> = [
   { collection: "barangays", label: "Barangays", singular: "barangay" },
@@ -116,6 +188,62 @@ const catalogDefinitions: Array<{ collection: OptionCollectionName; label: strin
   { collection: "courses", label: "Courses", singular: "course" },
   { collection: "batches", label: "Batches", singular: "batch" }
 ];
+
+const requiredStudentFieldLabels: Array<[keyof StudentDraft, string]> = [
+  ["full_name", "Full Name"],
+  ["student_number", "Student Number"],
+  ["barangay", "Barangay"],
+  ["address", "Address"],
+  ["school_address", "School"],
+  ["school_course", "Course"],
+  ["year_level", "Year Level"],
+  ["batch", "Batch"],
+  ["phone_number", "Phone"]
+];
+
+function emptyRequirementMap(): StudentRequirementMap {
+  return {
+    certificate_of_residency: false,
+    pagpapatunay_form: false,
+    picture_of_the_house: false,
+    good_moral_certificate: false,
+    original_certificate_of_grades: false,
+    proof_of_enrollment: false
+  };
+}
+
+function emptyRenewalRequirementMap(): StudentRenewalRequirementMap {
+  return {
+    liquidation: false,
+    proof_of_enrollment: false,
+    latest_grades: false
+  };
+}
+
+function requirementMapFromLegacySource(value: unknown): StudentRequirementMap {
+  const source = value && typeof value === "object" ? (value as Partial<Record<StudentRequirementKey, unknown>>) : {};
+  const requirements = emptyRequirementMap();
+
+  for (const field of requirementFields) {
+    requirements[field] = source[field] === true;
+  }
+
+  return requirements;
+}
+
+function renewalRequirementMapFromAny(value: unknown): StudentRenewalRequirementMap {
+  const source =
+    value && typeof value === "object"
+      ? (value as Partial<Record<StudentRenewalRequirementKey, unknown>>)
+      : {};
+  const requirements = emptyRenewalRequirementMap();
+
+  for (const field of renewalRequirementFields) {
+    requirements[field] = source[field] === true;
+  }
+
+  return requirements;
+}
 
 function emptyStudentDraft(): StudentDraft {
   return {
@@ -129,13 +257,7 @@ function emptyStudentDraft(): StudentDraft {
     school_course: "",
     year_level: "",
     batch: "",
-    certificate_of_residency: false,
-    pagpapatunay_form: false,
-    picture_of_the_house: false,
-    good_moral_certificate: false,
-    original_certificate_of_grades: false,
-    proof_of_enrollment: false,
-    school_id: false
+    requirements: emptyRequirementMap()
   };
 }
 
@@ -146,6 +268,49 @@ function emptyManagedUserDraft(): ManagedUserDraft {
     password: "",
     displayName: "",
     role: "encoder"
+  };
+}
+
+function currentCycleDraftFromConfig(config: CurrentCycleConfig): CurrentCycleDraft {
+  return {
+    school_year: config.school_year,
+    sem_number: String(config.sem_number),
+    status: config.status
+  };
+}
+
+function cycleConfigFromParts(schoolYear: string, semNumber: number): CurrentCycleConfig {
+  return {
+    school_year: schoolYear,
+    sem_number: semNumber,
+    cycle_key: cycleKeyFor(schoolYear, semNumber),
+    status: "open",
+    updated_at: "",
+    updated_by: ""
+  };
+}
+
+function schoolYearStart(schoolYear: string) {
+  const match = schoolYear.match(/\d{4}/);
+  return match ? Number(match[0]) : new Date().getFullYear();
+}
+
+function schoolYearLabelFromStart(startYear: number) {
+  return `${startYear}-${startYear + 1}`;
+}
+
+function generateSchoolYearOptions(anchorSchoolYear: string) {
+  const anchor = schoolYearStart(anchorSchoolYear);
+  const firstYear = anchor - 1;
+  return Array.from({ length: 10 }, (_, index) => schoolYearLabelFromStart(firstYear + index));
+}
+
+function emptyRenewalRecordDraft(): RenewalRecordDraft {
+  return {
+    payout_type: "initial",
+    initial_payout_requirements: emptyRequirementMap(),
+    renewal_requirements: emptyRenewalRequirementMap(),
+    notes: ""
   };
 }
 
@@ -180,9 +345,235 @@ function initials(name: string) {
   );
 }
 
+function missingStudentFields(draft: StudentDraft) {
+  return requiredStudentFieldLabels
+    .filter(([field]) => String(draft[field] ?? "").trim().length === 0)
+    .map(([, label]) => label);
+}
+
+function invalidCurrentCycleFields(draft: CurrentCycleDraft) {
+  const fields: string[] = [];
+  if (!draft.school_year.trim()) fields.push("School Year");
+
+  const semNumber = Number(draft.sem_number);
+  if (!draft.sem_number.trim() || !Number.isFinite(semNumber) || semNumber <= 0) {
+    fields.push("Semester Number");
+  }
+
+  return fields;
+}
+
+function invalidManagedUserFields(draft: ManagedUserDraft, isEditing: boolean) {
+  const fields: string[] = [];
+  const email = draft.email.trim();
+  const password = draft.password.trim();
+  const emailLooksValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+
+  if (!email) fields.push("Email");
+  else if (!emailLooksValid) fields.push("Valid Email");
+
+  if (!isEditing && !password) fields.push("Password");
+  if (!draft.role.trim()) fields.push("Role");
+
+  return fields;
+}
+
+function getStudentRequirements(student: Pick<Student, "requirements"> & Partial<Record<StudentRequirementKey, boolean>>) {
+  const requirements = student.requirements ? requirementMapFromLegacySource(student.requirements) : emptyRequirementMap();
+
+  for (const field of requirementFields) {
+    if (student[field] === true) {
+      requirements[field] = true;
+    }
+  }
+
+  return requirements;
+}
+
+function getSemesterRecords(student: Student) {
+  return Array.isArray(student.semester_records) ? student.semester_records : [];
+}
+
+function getSemesterRecordForCycle(student: Student, currentCycle: CurrentCycleConfig) {
+  return getSemesterRecords(student).find((record) => record.cycle_key === currentCycle.cycle_key) || null;
+}
+
+function getSemesterInitialPayoutRequirements(record: StudentSemesterRecord | null) {
+  return record?.initial_payout_requirements
+    ? requirementMapFromLegacySource(record.initial_payout_requirements)
+    : emptyRequirementMap();
+}
+
+function getSemesterRenewalRequirements(record: StudentSemesterRecord | null) {
+  return renewalRequirementMapFromAny(record?.renewal_requirements ?? record?.requirements);
+}
+
+function hasInitialPayroll(student: Student) {
+  return Boolean(
+    student.payrolled ||
+      getSemesterRecords(student).some(
+        (record) => record.payroll_status === "payrolled" || record.renewal_status === "payrolled"
+      )
+  );
+}
+
+function getSemesterPayoutType(student: Student, record: StudentSemesterRecord | null): StudentSemesterRecord["payout_type"] {
+  if (!hasInitialPayroll(student)) return "initial";
+  if (record?.payout_type === "initial" || record?.payout_type === "renewal") return record.payout_type;
+  return "renewal";
+}
+
+function getSemesterPayrollStatus(student: Student, cycle: CurrentCycleConfig): StudentSemesterRecord["payroll_status"] {
+  const record = getSemesterRecordForCycle(student, cycle);
+  if (getSemesterPayrollStatusFromRecord(record) === "payrolled") return "payrolled";
+  return isQualifiedForPayroll(student, cycle) ? "qualified" : "not_qualified";
+}
+
+function isInitialPayoutQualified(student: Student, record: StudentSemesterRecord | null) {
+  return requirementCompletionCount(getSemesterInitialPayoutRequirements(record)) === requirementFields.length;
+}
+
+function isRenewalPayoutQualified(record: StudentSemesterRecord | null) {
+  return renewalRequirementCompletionCount(getSemesterRenewalRequirements(record)) === renewalRequirementFields.length;
+}
+
+function isQualifiedForPayroll(student: Student, cycle: CurrentCycleConfig) {
+  const record = getSemesterRecordForCycle(student, cycle);
+  if (getSemesterPayrollStatusFromRecord(record) === "payrolled") return false;
+  return getSemesterPayoutType(student, record) === "renewal"
+    ? hasInitialPayroll(student) && isRenewalPayoutQualified(record)
+    : isInitialPayoutQualified(student, record);
+}
+
+function isPayrollCandidateForCycle(student: Student, cycle: CurrentCycleConfig) {
+  return !isPayrolledForCycle(student, cycle) && isQualifiedForPayroll(student, cycle);
+}
+
+function isPayoutTypeForCycle(student: Student, cycle: CurrentCycleConfig, payoutType: StudentSemesterRecord["payout_type"]) {
+  const record = getSemesterRecordForCycle(student, cycle);
+  return getSemesterPayoutType(student, record) === payoutType;
+}
+
+function payoutRecordTypeForCycle(student: Student, cycle: CurrentCycleConfig) {
+  const record = getSemesterRecordForCycle(student, cycle);
+  return getSemesterPayoutType(student, record) === "renewal" ? "renewal_payroll" : "initial_payout_payroll";
+}
+
+function payoutTypeLabelForCycle(student: Student, cycle: CurrentCycleConfig) {
+  const record = getSemesterRecordForCycle(student, cycle);
+  return getSemesterPayoutType(student, record) === "renewal" ? "Renewal" : "Initial payout";
+}
+
+function getSemesterPayrollStatusFromRecord(record: StudentSemesterRecord | null): StudentSemesterRecord["payroll_status"] {
+  if (record?.payroll_status) return record.payroll_status;
+  if (record?.renewal_status === "payrolled") return "payrolled";
+  if (record?.renewal_status === "renewed") return "qualified";
+  return "not_qualified";
+}
+
+function qualificationLabel(student: Student, cycle: CurrentCycleConfig) {
+  const record = getSemesterRecordForCycle(student, cycle);
+  const status = getSemesterPayrollStatus(student, cycle);
+  if (status === "payrolled") return "payrolled";
+  if (getSemesterPayoutType(student, record) === "renewal") {
+    if (!hasInitialPayroll(student)) return "needs initial payroll";
+    return isRenewalPayoutQualified(record) ? "renewal qualified" : "missing renewal requirements";
+  }
+  return isInitialPayoutQualified(student, record) ? "initial payout qualified" : "missing initial requirements";
+}
+
+function payrollStatusForDraft(student: Student, existingRecord: StudentSemesterRecord | null, draft: RenewalRecordDraft) {
+  if (getSemesterPayrollStatusFromRecord(existingRecord) === "payrolled") return "payrolled";
+  const initialComplete = requirementCompletionCount(draft.initial_payout_requirements) === requirementFields.length;
+  const renewalComplete = renewalRequirementCompletionCount(draft.renewal_requirements) === renewalRequirementFields.length;
+  return draft.payout_type === "renewal"
+    ? hasInitialPayroll(student) && renewalComplete
+      ? "qualified"
+      : "not_qualified"
+    : initialComplete
+      ? "qualified"
+      : "not_qualified";
+}
+
+function qualificationLabelForDraft(student: Student, existingRecord: StudentSemesterRecord | null, draft: RenewalRecordDraft) {
+  const status = payrollStatusForDraft(student, existingRecord, draft);
+  if (status === "payrolled") return "payrolled";
+  if (draft.payout_type === "renewal") {
+    if (!hasInitialPayroll(student)) return "needs initial payroll";
+    return status === "qualified" ? "renewal qualified" : "missing renewal requirements";
+  }
+  return status === "qualified" ? "initial payout qualified" : "missing initial requirements";
+}
+
+function legacyRenewalStatusForPayrollStatus(
+  student: Student,
+  payrollStatus: StudentSemesterRecord["payroll_status"]
+): NonNullable<StudentSemesterRecord["renewal_status"]> {
+  if (payrollStatus === "payrolled") return "payrolled";
+  if (payrollStatus === "qualified" && hasInitialPayroll(student)) return "renewed";
+  return "pending";
+}
+
+function buildSemesterRecordForCycle(
+  student: Student,
+  currentCycle: CurrentCycleConfig,
+  draft: RenewalRecordDraft,
+  actor: { uid?: string; email?: string } | null
+) {
+  const existingRecord = getSemesterRecordForCycle(student, currentCycle);
+  const now = new Date().toISOString();
+  const payrollStatus = payrollStatusForDraft(student, existingRecord, draft);
+
+  return {
+    school_year: currentCycle.school_year,
+    sem_number: currentCycle.sem_number,
+    cycle_key: currentCycle.cycle_key,
+    payout_type: draft.payout_type,
+    payroll_status: payrollStatus,
+    renewal_status: legacyRenewalStatusForPayrollStatus(student, payrollStatus),
+    initial_payout_requirements: draft.initial_payout_requirements,
+    renewal_requirements: draft.renewal_requirements,
+    requirements: draft.renewal_requirements,
+    created_at: existingRecord?.created_at || now,
+    updated_at: now,
+    updated_by_uid: actor?.uid || "",
+    updated_by_email: actor?.email || "",
+    notes: draft.notes.trim()
+  } satisfies StudentSemesterRecord;
+}
+
+function replaceSemesterRecord(records: StudentSemesterRecord[], nextRecord: StudentSemesterRecord) {
+  const withoutCurrent = records.filter((record) => record.cycle_key !== nextRecord.cycle_key);
+  return [...withoutCurrent, nextRecord].sort((left, right) => {
+    if (left.school_year !== right.school_year) return right.school_year.localeCompare(left.school_year);
+    return right.sem_number - left.sem_number;
+  });
+}
+
+function renewalRequirementCompletionCount(requirements: StudentRenewalRequirementMap) {
+  return renewalRequirementFields.filter((field) => requirements[field]).length;
+}
+
+function semesterLabel(config: Pick<CurrentCycleConfig, "school_year" | "sem_number">) {
+  const suffix =
+    config.sem_number === 1 ? "1st" : config.sem_number === 2 ? "2nd" : config.sem_number === 3 ? "3rd" : `${config.sem_number}th`;
+  return `${config.school_year}, ${suffix} Semester`;
+}
+
+function isRenewedForCycle(student: Student, currentCycle: CurrentCycleConfig) {
+  const status = getSemesterPayrollStatus(student, currentCycle);
+  return status === "qualified" || status === "payrolled";
+}
+
+function isPayrolledForCycle(student: Student, currentCycle: CurrentCycleConfig) {
+  const record = getSemesterRecordForCycle(student, currentCycle);
+  return getSemesterPayrollStatusFromRecord(record) === "payrolled";
+}
+
 function completionStatus(student: Student) {
-  const completed = documentFields.filter((field) => Boolean(student[field])).length;
-  return completed === documentFields.length ? "Complete" : `Incomplete (${completed}/${documentFields.length})`;
+  const requirements = getStudentRequirements(student);
+  const completed = requirementFields.filter((field) => Boolean(requirements[field])).length;
+  return completed === requirementFields.length ? "Complete" : `Incomplete (${completed}/${requirementFields.length})`;
 }
 
 function parseSortableNumber(value?: string) {
@@ -243,11 +634,12 @@ function yearLevelLabel(value?: string) {
 }
 
 function renewalHistoryCount(student: Student) {
-  return student.renewal_history?.filter((entry) => entry.status === "renewed").length || 0;
+  const semesterRenewals = getSemesterRecords(student).filter((record) => record.payroll_status === "qualified" || record.payroll_status === "payrolled" || record.renewal_status === "renewed" || record.renewal_status === "payrolled").length;
+  return Math.max(student.renewal_history?.filter((entry) => entry.status === "renewed").length || 0, semesterRenewals);
 }
 
 function isInRenewalScope(student: Student) {
-  return Boolean(student.claimed || student.renewed || student.renewal_history?.length);
+  return Boolean(student.claimed || student.renewed || student.renewal_history?.length || getSemesterRecords(student).length);
 }
 
 function downloadTextFile(filename: string, mimeType: string, content: string) {
@@ -272,7 +664,7 @@ function exportStudentsCsv(students: Student[]) {
     "Course",
     "Year Level",
     "Batch",
-    "Renewed",
+    "Initial Payroll Recorded",
     "Claimed"
   ];
   const rows = students.map((student) => [
@@ -286,12 +678,55 @@ function exportStudentsCsv(students: Student[]) {
     student.school_course,
     student.year_level,
     student.batch,
-    student.renewed ? "Yes" : "No",
+    student.payrolled ? "Yes" : "No",
     student.claimed ? "Yes" : "No"
   ]);
 
   const csv = [headers, ...rows].map((row) => row.map(csvCell).join(",")).join("\n");
   downloadTextFile("students-export.csv", "text/csv;charset=utf-8", csv);
+}
+
+function shellStateStorageKey(uid: string) {
+  return `sis-next:app-shell-state:${uid}`;
+}
+
+function scrollStorageKey(uid: string, pathname: string) {
+  return `sis-next:scroll:${uid}:${pathname}`;
+}
+
+function truthyDocumentLabels(student: StudentDraft) {
+  return requirementFields
+    .filter((field) => student.requirements[field])
+    .map((field) => REQUIREMENT_LABELS[field]);
+}
+
+function requirementCompletionCount(requirements: StudentRequirementMap) {
+  return requirementFields.filter((field) => requirements[field]).length;
+}
+
+function studentDraftFromAny(value: unknown): StudentDraft {
+  const source = value && typeof value === "object" ? (value as Partial<StudentDraft> & Partial<Record<StudentRequirementKey, unknown>>) : {};
+  return {
+    student_id: String(source.student_id ?? "").trim(),
+    full_name: String(source.full_name ?? "").trim(),
+    student_number: String(source.student_number ?? "").trim(),
+    barangay: String(source.barangay ?? "").trim(),
+    address: String(source.address ?? "").trim(),
+    school_address: String(source.school_address ?? "").trim(),
+    phone_number: String(source.phone_number ?? "").trim(),
+    school_course: String(source.school_course ?? "").trim(),
+    year_level: String(source.year_level ?? "").trim(),
+    batch: String(source.batch ?? "").trim(),
+    requirements: requirementMapFromLegacySource({
+      ...source.requirements,
+      certificate_of_residency: source.requirements?.certificate_of_residency ?? source.certificate_of_residency,
+      pagpapatunay_form: source.requirements?.pagpapatunay_form ?? source.pagpapatunay_form,
+      picture_of_the_house: source.requirements?.picture_of_the_house ?? source.picture_of_the_house,
+      good_moral_certificate: source.requirements?.good_moral_certificate ?? source.good_moral_certificate,
+      original_certificate_of_grades: source.requirements?.original_certificate_of_grades ?? source.original_certificate_of_grades,
+      proof_of_enrollment: source.requirements?.proof_of_enrollment ?? source.proof_of_enrollment
+    })
+  };
 }
 
 export function AppShell({
@@ -303,9 +738,14 @@ export function AppShell({
 }) {
   const { user, signOutUser } = useAuth();
   const router = useRouter();
+  const pathname = usePathname();
   const currentUser = user || initialData.user;
   const isAdmin = isAdminUser(currentUser);
   const signedOutMessageKey = "sis-next:signed-out-message";
+  const persistedStateKey = shellStateStorageKey(currentUser.uid);
+  const persistedScrollKey = scrollStorageKey(currentUser.uid, pathname);
+  const hydratedShellStateKeyRef = useRef<string | null>(null);
+  const hydratedScrollKeyRef = useRef<string | null>(null);
 
   const [activeView, setActiveView] = useState<AppViewName>(initialView);
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -313,9 +753,21 @@ export function AppShell({
   const [students, setStudents] = useState<Student[]>(initialData.students);
   const [trash, setTrash] = useState<Student[]>(initialData.trash);
   const [payoutRecords, setPayoutRecords] = useState<PayoutRecord[]>(initialData.payoutRecords);
+  const [operationLogs, setOperationLogs] = useState<OperationLog[]>(initialData.operationLogs);
   const [options, setOptions] = useState<OptionBuckets>(initialData.options);
   const [managedUsers, setManagedUsers] = useState<ManagedUser[]>([]);
   const [usersLoaded, setUsersLoaded] = useState(false);
+  const [currentCycle, setCurrentCycle] = useState<CurrentCycleConfig>(initialData.currentCycle);
+  const [currentCycleDraft, setCurrentCycleDraft] = useState<CurrentCycleDraft>(() => currentCycleDraftFromConfig(initialData.currentCycle));
+  const [renewalRecordStudentId, setRenewalRecordStudentId] = useState("");
+  const [renewalRecordCycle, setRenewalRecordCycle] = useState<CurrentCycleConfig | null>(null);
+  const [renewalRecordDraft, setRenewalRecordDraft] = useState<RenewalRecordDraft>(() => emptyRenewalRecordDraft());
+  const [requirementsSchoolYear, setRequirementsSchoolYear] = useState(initialData.currentCycle.school_year);
+  const [requirementsSemester, setRequirementsSemester] = useState(String(initialData.currentCycle.sem_number));
+  const [requirementsTab, setRequirementsTab] = useState<RequirementsTab>("non-payrolled");
+  const [requirementsNameFilter, setRequirementsNameFilter] = useState("");
+  const [requirementsSchoolFilter, setRequirementsSchoolFilter] = useState("");
+  const [requirementsBarangayFilter, setRequirementsBarangayFilter] = useState("");
   const [catalogCollection, setCatalogCollection] = useState<OptionCollectionName>("barangays");
   const [catalogDraftName, setCatalogDraftName] = useState("");
   const [catalogEditId, setCatalogEditId] = useState<string | null>(null);
@@ -324,7 +776,13 @@ export function AppShell({
   const [managedUserDraft, setManagedUserDraft] = useState<ManagedUserDraft>(() => emptyManagedUserDraft());
   const [managedUserEditId, setManagedUserEditId] = useState<string | null>(null);
   const [selectedPayrollIds, setSelectedPayrollIds] = useState<Set<string>>(() => new Set());
-  const [payrollTab, setPayrollTab] = useState<"unpayrolled" | "renewed">("unpayrolled");
+  const [payrollTab, setPayrollTab] = useState<PayrollTab>("new");
+  const [payrollSchoolYear, setPayrollSchoolYear] = useState(initialData.currentCycle.school_year);
+  const [payrollSemester, setPayrollSemester] = useState(String(initialData.currentCycle.sem_number));
+  const [payrollNameFilter, setPayrollNameFilter] = useState("");
+  const [payrollSchoolFilter, setPayrollSchoolFilter] = useState("");
+  const [payrollStatusFilter, setPayrollStatusFilter] = useState("all");
+  const [payrollBatchFilter, setPayrollBatchFilter] = useState("all");
   const [payrollMetadataDraft, setPayrollMetadataDraft] = useState<PayrollMetadataDraft>(() => emptyPayrollMetadataDraft());
   const [payrollHistoryStudentId, setPayrollHistoryStudentId] = useState("");
   const [payrollHistoryQuery, setPayrollHistoryQuery] = useState("");
@@ -335,6 +793,9 @@ export function AppShell({
   const [batchFilter, setBatchFilter] = useState("all");
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [notice, setNotice] = useState<{ type: "success" | "error" | "info"; message: string } | null>(null);
+  const [confirmation, setConfirmation] = useState<ConfirmationRequest | null>(null);
+  const [validationDialog, setValidationDialog] = useState<ValidationDialogRequest | null>(null);
+  const [studentReviewOpen, setStudentReviewOpen] = useState(false);
 
   const visibleNavItems = APP_VIEWS.filter((item) => !item.adminOnly || isAdmin);
 
@@ -344,11 +805,244 @@ export function AppShell({
   }, [initialView]);
 
   useEffect(() => {
+    setCurrentCycleDraft(currentCycleDraftFromConfig(currentCycle));
+  }, [currentCycle]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    try {
+      const saved = window.localStorage.getItem(persistedStateKey);
+      if (!saved) return;
+
+      const state = JSON.parse(saved) as {
+        version?: number;
+        catalogCollection?: OptionCollectionName;
+        catalogDraftName?: string;
+        catalogEditId?: string | null;
+        studentDraft?: unknown;
+        studentEditId?: string | null;
+        managedUserDraft?: Partial<ManagedUserDraft>;
+        managedUserEditId?: string | null;
+        currentCycleDraft?: Partial<CurrentCycleDraft>;
+        renewalRecordStudentId?: string;
+        renewalRecordCycle?: CurrentCycleConfig | null;
+        renewalRecordDraft?: Partial<RenewalRecordDraft>;
+        requirementsSchoolYear?: string;
+        requirementsSemester?: string;
+        requirementsTab?: RequirementsTab;
+        requirementsNameFilter?: string;
+        requirementsSchoolFilter?: string;
+        requirementsBarangayFilter?: string;
+        selectedPayrollIds?: string[];
+        payrollTab?: PayrollTab | "unpayrolled" | "renewed";
+        payrollSchoolYear?: string;
+        payrollSemester?: string;
+        payrollNameFilter?: string;
+        payrollSchoolFilter?: string;
+        payrollStatusFilter?: string;
+        payrollBatchFilter?: string;
+        payrollMetadataDraft?: Partial<PayrollMetadataDraft>;
+        payrollHistoryStudentId?: string;
+        payrollHistoryQuery?: string;
+        search?: string;
+        statusFilter?: string;
+        batchFilter?: string;
+      };
+      if (state.version !== 1 && state.version !== 2 && state.version !== 3) return;
+
+      if (state.catalogCollection) setCatalogCollection(state.catalogCollection);
+      if (typeof state.catalogDraftName === "string") setCatalogDraftName(state.catalogDraftName);
+      if (typeof state.catalogEditId === "string" || state.catalogEditId === null) setCatalogEditId(state.catalogEditId ?? null);
+      if (state.studentDraft) setStudentDraft(studentDraftFromAny(state.studentDraft));
+      if (typeof state.studentEditId === "string" || state.studentEditId === null) setStudentEditId(state.studentEditId ?? null);
+      if (state.managedUserDraft) setManagedUserDraft({ ...emptyManagedUserDraft(), ...state.managedUserDraft });
+      if (typeof state.managedUserEditId === "string" || state.managedUserEditId === null) {
+        setManagedUserEditId(state.managedUserEditId ?? null);
+      }
+      if (state.currentCycleDraft) {
+        setCurrentCycleDraft({
+          school_year: String(state.currentCycleDraft.school_year ?? initialData.currentCycle.school_year),
+          sem_number: String(state.currentCycleDraft.sem_number ?? initialData.currentCycle.sem_number),
+          status:
+            state.currentCycleDraft.status === "locked" ||
+            state.currentCycleDraft.status === "archived" ||
+            state.currentCycleDraft.status === "open"
+              ? state.currentCycleDraft.status
+              : initialData.currentCycle.status
+        });
+      }
+      if (typeof state.renewalRecordStudentId === "string") setRenewalRecordStudentId(state.renewalRecordStudentId);
+      if (state.renewalRecordCycle && typeof state.renewalRecordCycle.school_year === "string") {
+        const semNumber = Number(state.renewalRecordCycle.sem_number);
+        if (Number.isFinite(semNumber) && semNumber > 0) {
+          setRenewalRecordCycle(cycleConfigFromParts(state.renewalRecordCycle.school_year, semNumber));
+        }
+      }
+      if (state.renewalRecordDraft) {
+        setRenewalRecordDraft({
+          payout_type: state.renewalRecordDraft.payout_type === "renewal" ? "renewal" : "initial",
+          initial_payout_requirements: requirementMapFromLegacySource(state.renewalRecordDraft.initial_payout_requirements),
+          renewal_requirements: renewalRequirementMapFromAny(
+            state.renewalRecordDraft.renewal_requirements ?? (state.renewalRecordDraft as { requirements?: unknown }).requirements
+          ),
+          notes: String(state.renewalRecordDraft.notes ?? "")
+        });
+      }
+      if (typeof state.requirementsSchoolYear === "string") setRequirementsSchoolYear(state.requirementsSchoolYear);
+      if (typeof state.requirementsSemester === "string") setRequirementsSemester(state.requirementsSemester);
+      if (state.requirementsTab === "payrolled" || state.requirementsTab === "non-payrolled") {
+        setRequirementsTab(state.requirementsTab);
+      }
+      if (typeof state.requirementsNameFilter === "string") setRequirementsNameFilter(state.requirementsNameFilter);
+      if (typeof state.requirementsSchoolFilter === "string") setRequirementsSchoolFilter(state.requirementsSchoolFilter);
+      if (typeof state.requirementsBarangayFilter === "string") setRequirementsBarangayFilter(state.requirementsBarangayFilter);
+      if (Array.isArray(state.selectedPayrollIds)) setSelectedPayrollIds(new Set(state.selectedPayrollIds));
+      if (state.payrollTab === "new" || state.payrollTab === "renewal") {
+        setPayrollTab(state.payrollTab);
+      } else if (state.payrollTab === "renewed") {
+        setPayrollTab("renewal");
+      } else if (state.payrollTab === "unpayrolled") {
+        setPayrollTab("new");
+      }
+      if (typeof state.payrollSchoolYear === "string") setPayrollSchoolYear(state.payrollSchoolYear);
+      if (typeof state.payrollSemester === "string") setPayrollSemester(state.payrollSemester);
+      if (typeof state.payrollNameFilter === "string") setPayrollNameFilter(state.payrollNameFilter);
+      if (typeof state.payrollSchoolFilter === "string") setPayrollSchoolFilter(state.payrollSchoolFilter);
+      if (typeof state.payrollStatusFilter === "string") setPayrollStatusFilter(state.payrollStatusFilter);
+      if (typeof state.payrollBatchFilter === "string") setPayrollBatchFilter(state.payrollBatchFilter);
+      if (state.payrollMetadataDraft) {
+        setPayrollMetadataDraft({ ...emptyPayrollMetadataDraft(), ...state.payrollMetadataDraft });
+      }
+      if (typeof state.payrollHistoryStudentId === "string") setPayrollHistoryStudentId(state.payrollHistoryStudentId);
+      if (typeof state.payrollHistoryQuery === "string") setPayrollHistoryQuery(state.payrollHistoryQuery);
+      if (typeof state.search === "string") setSearch(state.search);
+      if (typeof state.statusFilter === "string") setStatusFilter(state.statusFilter);
+      if (typeof state.batchFilter === "string") setBatchFilter(state.batchFilter);
+    } catch {
+      window.localStorage.removeItem(persistedStateKey);
+    } finally {
+      hydratedShellStateKeyRef.current = persistedStateKey;
+    }
+  }, [persistedStateKey]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (hydratedShellStateKeyRef.current !== persistedStateKey) return;
+
+    const nextState: PersistedShellState = {
+      version: 3,
+      catalogCollection,
+      catalogDraftName,
+      catalogEditId,
+      studentDraft,
+      studentEditId,
+      managedUserDraft,
+      managedUserEditId,
+      currentCycleDraft,
+      renewalRecordStudentId,
+      renewalRecordCycle,
+      renewalRecordDraft,
+      requirementsSchoolYear,
+      requirementsSemester,
+      requirementsTab,
+      requirementsNameFilter,
+      requirementsSchoolFilter,
+      requirementsBarangayFilter,
+      selectedPayrollIds: [...selectedPayrollIds],
+      payrollTab,
+      payrollSchoolYear,
+      payrollSemester,
+      payrollNameFilter,
+      payrollSchoolFilter,
+      payrollStatusFilter,
+      payrollBatchFilter,
+      payrollMetadataDraft,
+      payrollHistoryStudentId,
+      payrollHistoryQuery,
+      search,
+      statusFilter,
+      batchFilter
+    };
+
+    window.localStorage.setItem(persistedStateKey, JSON.stringify(nextState));
+  }, [
+    batchFilter,
+    catalogCollection,
+    catalogDraftName,
+    catalogEditId,
+    managedUserDraft,
+    managedUserEditId,
+    currentCycleDraft,
+    renewalRecordDraft,
+    renewalRecordCycle,
+    renewalRecordStudentId,
+    requirementsSchoolYear,
+    requirementsSemester,
+    requirementsTab,
+    requirementsNameFilter,
+    requirementsSchoolFilter,
+    requirementsBarangayFilter,
+    payrollHistoryQuery,
+    payrollHistoryStudentId,
+    payrollNameFilter,
+    payrollSchoolFilter,
+    payrollStatusFilter,
+    payrollBatchFilter,
+    payrollMetadataDraft,
+    payrollSchoolYear,
+    payrollSemester,
+    payrollTab,
+    persistedStateKey,
+    search,
+    selectedPayrollIds,
+    statusFilter,
+    studentDraft,
+    studentEditId
+  ]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    try {
+      const savedScroll = Number(window.sessionStorage.getItem(persistedScrollKey) || "0");
+      hydratedScrollKeyRef.current = persistedScrollKey;
+
+      if (!Number.isFinite(savedScroll) || savedScroll <= 0) return;
+
+      window.requestAnimationFrame(() => {
+        window.scrollTo({ top: savedScroll, behavior: "auto" });
+      });
+    } catch {
+      window.sessionStorage.removeItem(persistedScrollKey);
+      hydratedScrollKeyRef.current = persistedScrollKey;
+    }
+  }, [persistedScrollKey]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (hydratedScrollKeyRef.current !== persistedScrollKey) return;
+
+    const saveScroll = () => {
+      window.sessionStorage.setItem(persistedScrollKey, String(window.scrollY));
+    };
+
+    saveScroll();
+    window.addEventListener("scroll", saveScroll, { passive: true });
+
+    return () => {
+      saveScroll();
+      window.removeEventListener("scroll", saveScroll);
+    };
+  }, [persistedScrollKey]);
+
+  useEffect(() => {
     let cancelled = false;
 
     async function refreshAll() {
-      const [nextStudents, nextOptions, nextTrash] = await Promise.all([
+      const [nextStudents, nextCycle, nextOptions, nextTrash] = await Promise.all([
         getStudents(),
+        getCurrentCycleConfig(),
         Promise.all([
           getOptions("barangays"),
           getOptions("schools"),
@@ -361,6 +1055,7 @@ export function AppShell({
       if (cancelled) return;
 
       setStudents(nextStudents);
+      setCurrentCycle(nextCycle);
       setOptions({
         barangays: nextOptions[0],
         schools: nextOptions[1],
@@ -389,6 +1084,12 @@ export function AppShell({
         showNotice(error instanceof Error ? error.message : "Unable to load managed users.", "error");
       });
   }, [activeView, isAdmin, usersLoaded]);
+
+  useEffect(() => {
+    if (!isAdmin && adminRecordStatusFilters.has(statusFilter)) {
+      setStatusFilter("all");
+    }
+  }, [isAdmin, statusFilter]);
 
   useEffect(() => {
     if (isAdminOnlyView(activeView) && !isAdmin) {
@@ -431,15 +1132,15 @@ export function AppShell({
 
       if (searchValue && !haystack.includes(searchValue)) return false;
       if (batchFilter !== "all" && student.batch !== batchFilter) return false;
-      if (statusFilter === "renewed" && !student.renewed) return false;
-      if (statusFilter === "unrenewed" && student.renewed) return false;
-      if (statusFilter === "payrolled" && !student.payrolled) return false;
-      if (statusFilter === "unpayrolled" && student.payrolled) return false;
+      if (statusFilter === "renewed" && !isRenewedForCycle(student, currentCycle)) return false;
+      if (statusFilter === "unrenewed" && isRenewedForCycle(student, currentCycle)) return false;
+      if (statusFilter === "payrolled" && !isPayrolledForCycle(student, currentCycle)) return false;
+      if (statusFilter === "unpayrolled" && isPayrolledForCycle(student, currentCycle)) return false;
       if (statusFilter === "complete" && completionStatus(student) !== "Complete") return false;
       if (statusFilter === "incomplete" && completionStatus(student) === "Complete") return false;
       return true;
     });
-  }, [batchFilter, search, statusFilter, students]);
+  }, [batchFilter, currentCycle, search, statusFilter, students]);
 
   const renewalRows = useMemo(
     () => students.filter(isInRenewalScope).sort((left, right) => left.full_name.localeCompare(right.full_name)),
@@ -480,6 +1181,55 @@ export function AppShell({
     () => students.find((student) => student.student_id === actionsStudentId) || null,
     [actionsStudentId, students]
   );
+  const renewalRecordStudent = useMemo(
+    () => students.find((student) => student.student_id === renewalRecordStudentId) || null,
+    [renewalRecordStudentId, students]
+  );
+  const activeRenewalRecordCycle = renewalRecordCycle || currentCycle;
+  const schoolYearOptions = useMemo(
+    () => generateSchoolYearOptions(requirementsSchoolYear || currentCycle.school_year),
+    [currentCycle.school_year, requirementsSchoolYear]
+  );
+  const requirementsSemesterNumber = Math.max(1, Math.min(2, Number(requirementsSemester) || currentCycle.sem_number || 1));
+  const requirementsCycle = useMemo(
+    () => cycleConfigFromParts(requirementsSchoolYear || currentCycle.school_year, requirementsSemesterNumber),
+    [currentCycle.school_year, requirementsSchoolYear, requirementsSemesterNumber]
+  );
+  const payrollSchoolYearOptions = useMemo(
+    () => generateSchoolYearOptions(payrollSchoolYear || currentCycle.school_year),
+    [currentCycle.school_year, payrollSchoolYear]
+  );
+  const payrollSemesterNumber = Math.max(1, Math.min(2, Number(payrollSemester) || currentCycle.sem_number || 1));
+  const payrollCycle = useMemo(
+    () => cycleConfigFromParts(payrollSchoolYear || currentCycle.school_year, payrollSemesterNumber),
+    [currentCycle.school_year, payrollSchoolYear, payrollSemesterNumber]
+  );
+  const requirementRows = useMemo(() => {
+    const nameFilter = requirementsNameFilter.trim().toLocaleLowerCase();
+    const schoolFilter = requirementsSchoolFilter.trim().toLocaleLowerCase();
+    const barangayFilter = requirementsBarangayFilter.trim().toLocaleLowerCase();
+    const cycleFilteredStudents = students.filter((student) => {
+      if (nameFilter && !student.full_name.toLocaleLowerCase().includes(nameFilter)) return false;
+      if (schoolFilter && !String(student.school_address || "").toLocaleLowerCase().includes(schoolFilter)) return false;
+      if (barangayFilter && !String(student.barangay || "").toLocaleLowerCase().includes(barangayFilter)) return false;
+      return true;
+    });
+    const rows = isAdmin
+      ? requirementsTab === "payrolled"
+        ? cycleFilteredStudents.filter((student) => isPayrolledForCycle(student, requirementsCycle))
+        : cycleFilteredStudents.filter((student) => !isPayrolledForCycle(student, requirementsCycle))
+      : cycleFilteredStudents;
+
+    return rows.slice().sort(comparePayrollStudents);
+  }, [
+    isAdmin,
+    requirementsBarangayFilter,
+    requirementsCycle,
+    requirementsNameFilter,
+    requirementsSchoolFilter,
+    requirementsTab,
+    students
+  ]);
 
   useEffect(() => {
     if (!selectedPayrollHistoryStudent) return;
@@ -509,15 +1259,38 @@ export function AppShell({
       .sort((left, right) => String(right.created_at || "").localeCompare(String(left.created_at || "")));
   }, [payrollHistoryStudentId, payoutRecords]);
 
+  const payrollFilteredStudents = useMemo(() => {
+    const nameFilter = payrollNameFilter.trim().toLocaleLowerCase();
+    const schoolFilter = payrollSchoolFilter.trim().toLocaleLowerCase();
+
+    return students.filter((student) => {
+      if (nameFilter && !String(student.full_name || "").toLocaleLowerCase().includes(nameFilter)) return false;
+      if (schoolFilter && !String(student.school_address || "").toLocaleLowerCase().includes(schoolFilter)) return false;
+      if (payrollBatchFilter !== "all" && student.batch !== payrollBatchFilter) return false;
+      return true;
+    });
+  }, [payrollBatchFilter, payrollNameFilter, payrollSchoolFilter, students]);
+
   const payrollRows = useMemo(() => {
-    const rows = payrollTab === "renewed"
-      ? filteredStudents.filter((student) => student.renewed)
-      : filteredStudents.filter((student) => !student.payrolled);
+    const payoutType = payrollTab === "renewal" ? "renewal" : "initial";
+    const rows = payrollFilteredStudents.filter((student) => {
+      if (!isPayoutTypeForCycle(student, payrollCycle, payoutType)) return false;
+      if (payrollStatusFilter === "payrolled") return isPayrolledForCycle(student, payrollCycle);
+      if (payrollStatusFilter === "unpayrolled") return !isPayrolledForCycle(student, payrollCycle);
+      if (payrollStatusFilter === "not_qualified") {
+        return !isPayrolledForCycle(student, payrollCycle) && !isQualifiedForPayroll(student, payrollCycle);
+      }
+      return isPayrollCandidateForCycle(student, payrollCycle);
+    });
     return rows.slice().sort(comparePayrollStudents);
-  }, [filteredStudents, payrollTab]);
+  }, [payrollCycle, payrollFilteredStudents, payrollStatusFilter, payrollTab]);
   const selectedPayrollRows = useMemo(
     () => payrollRows.filter((student) => selectedPayrollIds.has(student.student_id)),
     [payrollRows, selectedPayrollIds]
+  );
+  const hasInvalidPayrollSelection = useMemo(
+    () => selectedPayrollRows.some((student) => !isPayrollCandidateForCycle(student, payrollCycle)),
+    [payrollCycle, selectedPayrollRows]
   );
 
   useEffect(() => {
@@ -532,15 +1305,94 @@ export function AppShell({
     () => ({
       total: students.length,
       claimed: students.filter((student) => student.claimed).length,
-      renewedPending: renewalRows.filter((student) => !student.renewed).length,
+      renewedPending: students.filter((student) => isPayrollCandidateForCycle(student, currentCycle)).length,
       trash: trash.length,
       payrollRecords: payoutRecords.length
     }),
-    [payoutRecords.length, renewalRows, students, trash]
+    [currentCycle, payoutRecords.length, renewalRows, students, trash]
   );
 
   function showNotice(message: string, type: "success" | "error" | "info" = "success") {
     setNotice({ message, type });
+  }
+
+  function showValidationDialog(input: ValidationDialogRequest) {
+    setValidationDialog(input);
+  }
+
+  function requestConfirmation(input: Omit<ConfirmationRequest, "resolve">) {
+    return new Promise<boolean>((resolve) => {
+      setConfirmation({ ...input, resolve });
+    });
+  }
+
+  function resolveConfirmation(confirmed: boolean) {
+    setConfirmation((current) => {
+      current?.resolve(confirmed);
+      return null;
+    });
+  }
+
+  async function recordOperation(input: OperationLogInput) {
+    try {
+      const operationLog = await saveOperationLog(input);
+      setOperationLogs((current) => [operationLog, ...current].slice(0, 50));
+    } catch (error) {
+      console.warn("Unable to record operation log.", error);
+    }
+  }
+
+  function busyMessage() {
+    if (!busyKey) return "";
+    if (busyKey === "export-payroll") return "Creating payroll files and recording cycle updates.";
+    if (busyKey.includes("delete")) return "Deleting the selected record.";
+    if (busyKey.includes("trash")) return "Moving the student record to trash.";
+    if (busyKey.includes("restore")) return "Restoring the student record.";
+    if (busyKey.includes("save") || busyKey.includes("submit") || busyKey.includes("update")) return "Saving changes.";
+    return "Processing operation.";
+  }
+
+  function persistShellStateSnapshot(overrides: Partial<PersistedShellState> = {}) {
+    if (typeof window === "undefined") return;
+
+    const nextState: PersistedShellState = {
+      version: 3,
+      catalogCollection,
+      catalogDraftName,
+      catalogEditId,
+      studentDraft,
+      studentEditId,
+      managedUserDraft,
+      managedUserEditId,
+      currentCycleDraft,
+      renewalRecordStudentId,
+      renewalRecordCycle,
+      renewalRecordDraft,
+      requirementsSchoolYear,
+      requirementsSemester,
+      requirementsTab,
+      requirementsNameFilter,
+      requirementsSchoolFilter,
+      requirementsBarangayFilter,
+      selectedPayrollIds: [...selectedPayrollIds],
+      payrollTab,
+      payrollSchoolYear,
+      payrollSemester,
+      payrollNameFilter,
+      payrollSchoolFilter,
+      payrollStatusFilter,
+      payrollBatchFilter,
+      payrollMetadataDraft,
+      payrollHistoryStudentId,
+      payrollHistoryQuery,
+      search,
+      statusFilter,
+      batchFilter,
+      ...overrides
+    };
+
+    window.localStorage.setItem(persistedStateKey, JSON.stringify(nextState));
+    window.sessionStorage.setItem(persistedScrollKey, String(window.scrollY));
   }
 
   function withBusy<T>(key: string, task: () => Promise<T>) {
@@ -548,8 +1400,9 @@ export function AppShell({
     return task().finally(() => setBusyKey((current) => (current === key ? null : current)));
   }
 
-  function navigate(view: AppViewName) {
+  function navigate(view: AppViewName, overrides: Partial<PersistedShellState> = {}) {
     if (isAdminOnlyView(view) && !isAdmin) return;
+    persistShellStateSnapshot(overrides);
     setActiveView(view);
     setSidebarOpen(false);
     router.push(routeForView(view));
@@ -561,6 +1414,8 @@ export function AppShell({
     setIsSigningOut(true);
 
     try {
+      window.localStorage.removeItem(persistedStateKey);
+      window.sessionStorage.removeItem(persistedScrollKey);
       await signOutUser();
       window.sessionStorage.setItem(signedOutMessageKey, "1");
       window.location.reload();
@@ -571,11 +1426,84 @@ export function AppShell({
   }
 
   function patchStudentDraft(student: Partial<StudentDraft>) {
-    setStudentDraft((current) => ({ ...current, ...student }));
+    setStudentDraft((current) => ({
+      ...current,
+      ...student,
+      requirements: student.requirements ? { ...current.requirements, ...student.requirements } : current.requirements
+    }));
+  }
+
+  function patchStudentRequirement(field: StudentRequirementKey, checked: boolean) {
+    setStudentDraft((current) => ({
+      ...current,
+      requirements: {
+        ...current.requirements,
+        [field]: checked
+      }
+    }));
   }
 
   function patchPayrollMetadataDraft(metadata: Partial<PayrollMetadataDraft>) {
     setPayrollMetadataDraft((current) => ({ ...current, ...metadata }));
+  }
+
+  function patchCurrentCycleDraft(update: Partial<CurrentCycleDraft>) {
+    setCurrentCycleDraft((current) => ({ ...current, ...update }));
+  }
+
+  function patchRenewalRecordDraft(update: Partial<RenewalRecordDraft>) {
+    setRenewalRecordDraft((current) => ({
+      ...current,
+      ...update,
+      initial_payout_requirements: update.initial_payout_requirements
+        ? { ...current.initial_payout_requirements, ...update.initial_payout_requirements }
+        : current.initial_payout_requirements,
+      renewal_requirements: update.renewal_requirements
+        ? { ...current.renewal_requirements, ...update.renewal_requirements }
+        : current.renewal_requirements
+    }));
+  }
+
+  function patchInitialPayoutRequirement(field: StudentRequirementKey, checked: boolean) {
+    setRenewalRecordDraft((current) => ({
+      ...current,
+      initial_payout_requirements: {
+        ...current.initial_payout_requirements,
+        [field]: checked
+      }
+    }));
+  }
+
+  function setAllInitialPayoutRequirements(checked: boolean) {
+    const nextRequirements = Object.fromEntries(
+      requirementFields.map((field) => [field, checked])
+    ) as StudentRequirementMap;
+
+    setRenewalRecordDraft((current) => ({
+      ...current,
+      initial_payout_requirements: nextRequirements
+    }));
+  }
+
+  function patchRenewalRequirement(field: StudentRenewalRequirementKey, checked: boolean) {
+    setRenewalRecordDraft((current) => ({
+      ...current,
+      renewal_requirements: {
+        ...current.renewal_requirements,
+        [field]: checked
+      }
+    }));
+  }
+
+  function setAllRenewalRequirements(checked: boolean) {
+    const nextRequirements = Object.fromEntries(
+      renewalRequirementFields.map((field) => [field, checked])
+    ) as StudentRenewalRequirementMap;
+
+    setRenewalRecordDraft((current) => ({
+      ...current,
+      renewal_requirements: nextRequirements
+    }));
   }
 
   function selectPayrollHistoryStudent(student: Student) {
@@ -585,9 +1513,7 @@ export function AppShell({
   }
 
   function fillStudentDraft(student: Student) {
-    setStudentEditId(student.student_id);
-    navigate("register");
-    setStudentDraft({
+    const nextDraft = {
       student_id: student.student_id || "",
       full_name: student.full_name || "",
       student_number: student.student_number || "",
@@ -598,24 +1524,50 @@ export function AppShell({
       school_course: student.school_course || "",
       year_level: student.year_level || "",
       batch: student.batch || "",
-      certificate_of_residency: student.certificate_of_residency === true,
-      pagpapatunay_form: student.pagpapatunay_form === true,
-      picture_of_the_house: student.picture_of_the_house === true,
-      good_moral_certificate: student.good_moral_certificate === true,
-      original_certificate_of_grades: student.original_certificate_of_grades === true,
-      proof_of_enrollment: student.proof_of_enrollment === true,
-      school_id: student.school_id === true
+      requirements: getStudentRequirements(student)
+    };
+
+    setStudentEditId(student.student_id);
+    setStudentDraft(nextDraft);
+    navigate("register", {
+      studentEditId: student.student_id,
+      studentDraft: nextDraft
     });
   }
 
   function resetStudentForm() {
+    setStudentReviewOpen(false);
     setStudentEditId(null);
     setStudentDraft(emptyStudentDraft());
   }
 
-  async function handleStudentSubmit(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!isAdmin) return;
+  function openRenewalRecord(student: Student, cycle: CurrentCycleConfig = currentCycle) {
+    const currentRecord = getSemesterRecordForCycle(student, cycle);
+    setRenewalRecordStudentId(student.student_id);
+    setRenewalRecordCycle(cycle);
+    setRenewalRecordDraft(
+      currentRecord
+        ? {
+            payout_type: getSemesterPayoutType(student, currentRecord),
+            initial_payout_requirements: getSemesterInitialPayoutRequirements(currentRecord),
+            renewal_requirements: getSemesterRenewalRequirements(currentRecord),
+            notes: currentRecord.notes || ""
+          }
+        : {
+            ...emptyRenewalRecordDraft(),
+            payout_type: hasInitialPayroll(student) ? "renewal" : "initial"
+          }
+    );
+  }
+
+  function closeRenewalRecord() {
+    setRenewalRecordStudentId("");
+    setRenewalRecordCycle(null);
+    setRenewalRecordDraft(emptyRenewalRecordDraft());
+  }
+
+  async function commitStudentSubmit() {
+    if (studentEditId && !isAdmin) return;
 
     try {
       const savedStudent = await withBusy("student-submit", () =>
@@ -630,16 +1582,146 @@ export function AppShell({
       });
 
       resetStudentForm();
+      void recordOperation({
+        action: studentEditId ? "update" : "insert",
+        entity: "student",
+        entity_id: savedStudent.student_id,
+        summary: `${studentEditId ? "Updated" : "Created"} student ${savedStudent.full_name}.`,
+        metadata: { student_id: savedStudent.student_id }
+      });
       showNotice(studentEditId ? "Student record updated." : "Student record created.");
-      navigate("records");
+      navigate("records", {
+        studentEditId: null,
+        studentDraft: emptyStudentDraft()
+      });
     } catch (error) {
       showNotice(error instanceof Error ? error.message : "Unable to save student.", "error");
     }
   }
 
-  async function handleStudentFlagUpdate(student: Student, field: "claimed" | "renewed" | "payrolled") {
+  function handleStudentSubmit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (studentEditId && !isAdmin) return;
+
+    const missingFields = missingStudentFields(studentDraft);
+    if (missingFields.length) {
+      showValidationDialog({
+        title: studentEditId ? "Complete Student Update" : "Complete Student Registration",
+        message: "Fill in the missing student fields before saving this record.",
+        fields: missingFields,
+        acknowledgeLabel: "Review Fields"
+      });
+      return;
+    }
+
+    setStudentReviewOpen(true);
+  }
+
+  async function handleSaveCurrentCycle() {
+    if (!isAdmin) return;
+
+    const schoolYear = currentCycleDraft.school_year.trim();
+    const semNumber = Number(currentCycleDraft.sem_number);
+
+    const invalidFields = invalidCurrentCycleFields(currentCycleDraft);
+    if (invalidFields.length) {
+      showValidationDialog({
+        title: "Complete Current Cycle Details",
+        message: "Enter valid current cycle details before saving.",
+        fields: invalidFields,
+        acknowledgeLabel: "Review Cycle"
+      });
+      return;
+    }
+
+    const confirmed = await requestConfirmation({
+      title: "Save Current Cycle",
+      message: `Set the current operating cycle to ${schoolYear}, ${semNumber === 1 ? "1st" : semNumber === 2 ? "2nd" : `${semNumber}th`} Semester?`,
+      confirmLabel: "Save Cycle"
+    });
+    if (!confirmed) return;
+
     try {
-      const nextValue = !student[field];
+      const savedCycle = await withBusy("save-current-cycle", () =>
+        saveCurrentCycleConfig({
+          school_year: schoolYear,
+          sem_number: semNumber,
+          status: currentCycleDraft.status
+        })
+      );
+      setCurrentCycle(savedCycle);
+      setCurrentCycleDraft(currentCycleDraftFromConfig(savedCycle));
+      void recordOperation({
+        action: "update",
+        entity: "current_cycle",
+        entity_id: savedCycle.cycle_key,
+        summary: `Updated current cycle to ${semesterLabel(savedCycle)}.`,
+        metadata: { school_year: savedCycle.school_year, sem_number: savedCycle.sem_number, status: savedCycle.status }
+      });
+      showNotice(`Current cycle updated to ${semesterLabel(savedCycle)}.`);
+    } catch (error) {
+      showNotice(error instanceof Error ? error.message : "Unable to save the current cycle.", "error");
+    }
+  }
+
+  async function handleSaveRenewalRecord() {
+    if (!renewalRecordStudent) return;
+
+    if (!hasInitialPayroll(renewalRecordStudent) && renewalRequirementCompletionCount(renewalRecordDraft.renewal_requirements) > 0) {
+      showValidationDialog({
+        title: "Complete Initial Payroll First",
+        message: "Initial payroll must be recorded before renewal requirements can be fulfilled.",
+        fields: ["Initial Payroll"],
+        acknowledgeLabel: "Review Record"
+      });
+      return;
+    }
+
+    const nextRecord = buildSemesterRecordForCycle(renewalRecordStudent, activeRenewalRecordCycle, renewalRecordDraft, currentUser);
+    const currentRecords = getSemesterRecords(renewalRecordStudent);
+    const nextSemesterRecords = replaceSemesterRecord(currentRecords, nextRecord);
+
+    const confirmed = await requestConfirmation({
+      title: "Save Requirements",
+      message: `Save requirement changes for ${renewalRecordStudent.full_name} in ${semesterLabel(activeRenewalRecordCycle)}?`,
+      confirmLabel: "Save Requirements"
+    });
+    if (!confirmed) return;
+
+    try {
+      const updatedStudent = await withBusy(`renewal-record-${renewalRecordStudent.student_id}`, () =>
+        updateStudent(renewalRecordStudent.student_id, {
+          semester_records: nextSemesterRecords
+        })
+      );
+
+      setStudents((current) =>
+        current.map((student) => (student.student_id === updatedStudent.student_id ? updatedStudent : student))
+      );
+      closeRenewalRecord();
+      void recordOperation({
+        action: "update",
+        entity: "student_requirements",
+        entity_id: updatedStudent.student_id,
+        summary: `Updated semester requirements for ${updatedStudent.full_name} in ${semesterLabel(activeRenewalRecordCycle)}.`,
+        metadata: { student_id: updatedStudent.student_id, cycle_key: activeRenewalRecordCycle.cycle_key }
+      });
+      showNotice(`Renewal record saved for ${updatedStudent.full_name} in ${semesterLabel(activeRenewalRecordCycle)}.`);
+    } catch (error) {
+      showNotice(error instanceof Error ? error.message : "Unable to save the renewal record.", "error");
+    }
+  }
+
+  async function handleStudentFlagUpdate(student: Student, field: "claimed" | "renewed" | "payrolled") {
+    const nextValue = !student[field];
+    const confirmed = await requestConfirmation({
+      title: "Update Student Flag",
+      message: `${nextValue ? "Mark" : "Unmark"} ${student.full_name} as ${field}?`,
+      confirmLabel: "Update"
+    });
+    if (!confirmed) return;
+
+    try {
       const timestampField = `${field}_at` as "claimed_at" | "renewed_at" | "payrolled_at";
       const updatedStudent = await withBusy(`student-flag-${student.student_id}-${field}`, () =>
         updateStudent(student.student_id, {
@@ -651,6 +1733,13 @@ export function AppShell({
       setStudents((current) =>
         current.map((item) => (item.student_id === updatedStudent.student_id ? updatedStudent : item))
       );
+      void recordOperation({
+        action: "update",
+        entity: "student_flag",
+        entity_id: updatedStudent.student_id,
+        summary: `${nextValue ? "Enabled" : "Disabled"} ${field} for ${updatedStudent.full_name}.`,
+        metadata: { student_id: updatedStudent.student_id, field, value: nextValue }
+      });
       showNotice(`${student.full_name} updated.`);
     } catch (error) {
       showNotice(error instanceof Error ? error.message : "Unable to update record.", "error");
@@ -660,12 +1749,27 @@ export function AppShell({
   async function handleMoveToTrash(student: Student) {
     if (!isAdmin) return;
 
+    const confirmed = await requestConfirmation({
+      title: "Move Student To Trash",
+      message: `Move ${student.full_name} to trash? This removes them from active records but can still be restored.`,
+      confirmLabel: "Move To Trash",
+      danger: true
+    });
+    if (!confirmed) return;
+
     try {
       const removed = await withBusy(`trash-${student.student_id}`, () => moveStudentToTrash(student.student_id));
       setStudents((current) => current.filter((item) => item.student_id !== student.student_id));
       if (removed) {
         setTrash((current) => [removed, ...current.filter((item) => item.student_id !== removed.student_id)]);
       }
+      void recordOperation({
+        action: "delete",
+        entity: "student",
+        entity_id: student.student_id,
+        summary: `Moved ${student.full_name} to trash.`,
+        metadata: { student_id: student.student_id }
+      });
       showNotice(`${student.full_name} moved to trash.`);
     } catch (error) {
       showNotice(error instanceof Error ? error.message : "Unable to move student to trash.", "error");
@@ -673,10 +1777,24 @@ export function AppShell({
   }
 
   async function handleRestoreStudent(student: Student) {
+    const confirmed = await requestConfirmation({
+      title: "Restore Student",
+      message: `Restore ${student.full_name} to active records?`,
+      confirmLabel: "Restore"
+    });
+    if (!confirmed) return;
+
     try {
       const restored = await withBusy(`restore-${student.student_id}`, () => restoreStudent(student.student_id));
       setTrash((current) => current.filter((item) => item.student_id !== student.student_id));
       setStudents((current) => [restored, ...current.filter((item) => item.student_id !== restored.student_id)]);
+      void recordOperation({
+        action: "restore",
+        entity: "student",
+        entity_id: restored.student_id,
+        summary: `Restored ${restored.full_name} from trash.`,
+        metadata: { student_id: restored.student_id }
+      });
       showNotice(`${student.full_name} restored.`);
     } catch (error) {
       showNotice(error instanceof Error ? error.message : "Unable to restore student.", "error");
@@ -684,9 +1802,24 @@ export function AppShell({
   }
 
   async function handlePermanentDelete(student: Student) {
+    const confirmed = await requestConfirmation({
+      title: "Permanently Delete Student",
+      message: `Permanently delete ${student.full_name}? This action cannot be undone.`,
+      confirmLabel: "Delete Permanently",
+      danger: true
+    });
+    if (!confirmed) return;
+
     try {
       await withBusy(`delete-trash-${student.student_id}`, () => deleteTrashStudent(student.student_id));
       setTrash((current) => current.filter((item) => item.student_id !== student.student_id));
+      void recordOperation({
+        action: "delete",
+        entity: "trash_student",
+        entity_id: student.student_id,
+        summary: `Permanently deleted ${student.full_name}.`,
+        metadata: { student_id: student.student_id }
+      });
       showNotice(`${student.full_name} permanently deleted from trash.`);
     } catch (error) {
       showNotice(error instanceof Error ? error.message : "Unable to delete trash record.", "error");
@@ -697,6 +1830,24 @@ export function AppShell({
     event.preventDefault();
     if (!isAdmin) return;
 
+    const invalidFields = invalidManagedUserFields(managedUserDraft, Boolean(managedUserEditId));
+    if (invalidFields.length) {
+      showValidationDialog({
+        title: managedUserEditId ? "Complete User Update" : "Complete User Creation",
+        message: "Fill in the required user details before saving this account.",
+        fields: invalidFields,
+        acknowledgeLabel: "Review User"
+      });
+      return;
+    }
+
+    const confirmed = await requestConfirmation({
+      title: managedUserEditId ? "Update User" : "Create User",
+      message: `${managedUserEditId ? "Update" : "Create"} the managed user ${managedUserDraft.email}?`,
+      confirmLabel: managedUserEditId ? "Update User" : "Create User"
+    });
+    if (!confirmed) return;
+
     try {
       if (managedUserEditId) {
         const updated = await withBusy("managed-user-update", () =>
@@ -706,6 +1857,13 @@ export function AppShell({
           })
         );
         setManagedUsers((current) => current.map((item) => (item.uid === updated.uid ? updated : item)));
+        void recordOperation({
+          action: "update",
+          entity: "managed_user",
+          entity_id: updated.uid,
+          summary: `Updated managed user ${updated.email}.`,
+          metadata: { uid: updated.uid, email: updated.email }
+        });
         showNotice("Managed user updated.");
       } else {
         const created = await withBusy("managed-user-create", () =>
@@ -717,6 +1875,13 @@ export function AppShell({
           })
         );
         setManagedUsers((current) => [created, ...current]);
+        void recordOperation({
+          action: "insert",
+          entity: "managed_user",
+          entity_id: created.uid,
+          summary: `Created managed user ${created.email}.`,
+          metadata: { uid: created.uid, email: created.email, role: created.role }
+        });
         showNotice("Managed user created.");
       }
 
@@ -728,21 +1893,41 @@ export function AppShell({
   }
 
   function fillManagedUserDraft(userRecord: ManagedUser) {
-    setManagedUserEditId(userRecord.uid);
-    setManagedUserDraft({
+    const nextDraft = {
       uid: userRecord.uid,
       email: userRecord.email,
       password: "",
       displayName: userRecord.displayName || "",
       role: userRecord.role || "encoder"
+    };
+
+    setManagedUserEditId(userRecord.uid);
+    setManagedUserDraft(nextDraft);
+    navigate("users", {
+      managedUserEditId: userRecord.uid,
+      managedUserDraft: nextDraft
     });
-    navigate("users");
   }
 
   async function handleDeleteManagedUser(userRecord: ManagedUser) {
+    const confirmed = await requestConfirmation({
+      title: "Delete User",
+      message: `Delete managed user ${userRecord.email}? This removes their Firebase Auth account.`,
+      confirmLabel: "Delete User",
+      danger: true
+    });
+    if (!confirmed) return;
+
     try {
       await withBusy(`delete-user-${userRecord.uid}`, () => deleteManagedUser(userRecord.uid));
       setManagedUsers((current) => current.filter((item) => item.uid !== userRecord.uid));
+      void recordOperation({
+        action: "delete",
+        entity: "managed_user",
+        entity_id: userRecord.uid,
+        summary: `Deleted managed user ${userRecord.email}.`,
+        metadata: { uid: userRecord.uid, email: userRecord.email }
+      });
       showNotice(`${userRecord.email} removed.`);
     } catch (error) {
       showNotice(error instanceof Error ? error.message : "Unable to delete user.", "error");
@@ -764,6 +1949,13 @@ export function AppShell({
     const name = catalogDraftName.trim();
     if (!name) return;
 
+    const confirmed = await requestConfirmation({
+      title: catalogEditId ? "Update Catalog Record" : "Add Catalog Record",
+      message: `${catalogEditId ? "Update" : "Add"} "${name}" in ${collection}?`,
+      confirmLabel: catalogEditId ? "Update" : "Add"
+    });
+    if (!confirmed) return;
+
     try {
       const saved = await withBusy(`option-${collection}-save`, () =>
         saveOption(collection, { id: catalogEditId || undefined, name })
@@ -775,6 +1967,13 @@ export function AppShell({
         )
       }));
       resetCatalogEditor();
+      void recordOperation({
+        action: catalogEditId ? "update" : "insert",
+        entity: collection,
+        entity_id: saved.id,
+        summary: `${catalogEditId ? "Updated" : "Added"} ${saved.name} in ${collection}.`,
+        metadata: { collection, id: saved.id, name: saved.name }
+      });
       showNotice(`${saved.name} ${catalogEditId ? "updated" : "added"} in ${collection}.`);
     } catch (error) {
       showNotice(error instanceof Error ? error.message : "Unable to save option.", "error");
@@ -782,6 +1981,14 @@ export function AppShell({
   }
 
   async function handleDeleteOption(collection: OptionCollectionName, record: OptionRecord) {
+    const confirmed = await requestConfirmation({
+      title: "Delete Catalog Record",
+      message: `Delete "${record.name}" from ${collection}?`,
+      confirmLabel: "Delete",
+      danger: true
+    });
+    if (!confirmed) return;
+
     try {
       await withBusy(`option-${collection}-${record.id}`, () => deleteOption(collection, record.id));
       setOptions((current) => ({
@@ -791,6 +1998,13 @@ export function AppShell({
       if (catalogEditId === record.id && catalogCollection === collection) {
         resetCatalogEditor();
       }
+      void recordOperation({
+        action: "delete",
+        entity: collection,
+        entity_id: record.id,
+        summary: `Deleted ${record.name} from ${collection}.`,
+        metadata: { collection, id: record.id, name: record.name }
+      });
       showNotice(`${record.name} removed.`);
     } catch (error) {
       showNotice(error instanceof Error ? error.message : "Unable to delete option.", "error");
@@ -799,33 +2013,57 @@ export function AppShell({
 
   async function handleExportPayroll() {
     if (!selectedPayrollRows.length) {
-      showNotice("Select at least one student for payroll.", "error");
+      showValidationDialog({
+        title: "Select Students For Payroll",
+        message: "Choose at least one student before creating payroll files.",
+        fields: ["Student Selection"],
+        acknowledgeLabel: "Select Students"
+      });
       return;
     }
 
-    if (
-      !payrollMetadataDraft.date_of_filing.trim() ||
-      !payrollMetadataDraft.school_year.trim() ||
-      !payrollMetadataDraft.sem_number.trim()
-    ) {
-      showNotice("Enter the date of filing, school year, and semester number before creating payroll files.", "error");
+    if (hasInvalidPayrollSelection) {
+      showValidationDialog({
+        title: "Review Payroll Selection",
+        message: "Only qualified unpaid candidates for the selected semester can be included in this payroll.",
+        fields: ["Qualified Student Selection"],
+        acknowledgeLabel: "Adjust Selection"
+      });
       return;
     }
+
+    if (!payrollMetadataDraft.date_of_filing.trim()) {
+      showValidationDialog({
+        title: "Complete Payroll Details",
+        message: "Fill in the missing payroll field before creating payroll files.",
+        fields: ["Date Of Filing"],
+        acknowledgeLabel: "Add Date"
+      });
+      return;
+    }
+
+    const confirmed = await requestConfirmation({
+      title: "Create Payroll Files",
+      message: `Create payroll files for ${selectedPayrollRows.length} ${payrollTab === "new" ? "new" : "renewal"} student${selectedPayrollRows.length === 1 ? "" : "s"} in ${semesterLabel(payrollCycle)}?`,
+      confirmLabel: "Create Payroll"
+    });
+    if (!confirmed) return;
 
     try {
       const payrollId = `payroll-${new Date().toISOString().slice(0, 10)}-${Date.now()}`;
       const createdAt = new Date().toISOString();
-      const shouldMarkRenewed = payrollTab === "unpayrolled";
-      const payrollType = shouldMarkRenewed ? "new_student_payroll" : "renewed_student_payroll";
-      const payrollNote = shouldMarkRenewed
-        ? "Created from No Payrolled Students. Student was marked renewed and payrolled."
-        : "Created from Renewed Students. Student was marked payrolled.";
+      const exportMetadata: PayrollMetadataDraft = {
+        ...payrollMetadataDraft,
+        school_year: payrollCycle.school_year,
+        sem_number: String(payrollCycle.sem_number)
+      };
       const groupCount = await withBusy("export-payroll", async () => {
-        const exportedGroupCount = await exportPayrollFiles(selectedPayrollRows, payrollMetadataDraft, payrollId);
+        const exportedGroupCount = await exportPayrollFiles(selectedPayrollRows, exportMetadata, payrollId);
         const [createdRecords, updatedStudents] = await Promise.all([
           Promise.all(
-            selectedPayrollRows.map((student) =>
-              savePayoutRecord({
+            selectedPayrollRows.map((student) => {
+              const payoutTypeLabel = payoutTypeLabelForCycle(student, payrollCycle);
+              return savePayoutRecord({
                 payroll_id: payrollId,
                 student_id: student.student_id,
                 student_name: student.full_name,
@@ -834,25 +2072,47 @@ export function AppShell({
                 course: student.school_course,
                 year_level: student.year_level,
                 batch: student.batch,
-                type: payrollType,
+                type: payoutRecordTypeForCycle(student, payrollCycle),
                 status: "generated",
                 amount: 5000,
                 payroll_group_count: exportedGroupCount,
                 payroll_student_count: selectedPayrollRows.length,
-                notes: `${payrollNote} Generated on ${createdAt}.`
-              })
-            )
+                notes: `${payoutTypeLabel} payroll generated from ${semesterLabel(payrollCycle)} requirement qualification on ${createdAt}.`
+              });
+            })
           ),
           Promise.all(
-            selectedPayrollRows.map((student) =>
-              student.payrolled && (!shouldMarkRenewed || student.renewed)
-                ? Promise.resolve(student)
-                : updateStudent(student.student_id, {
-                    ...(shouldMarkRenewed ? { renewed: true, renewed_at: student.renewed_at || createdAt } : {}),
-                    payrolled: true,
-                    payrolled_at: createdAt
-                  })
-            )
+            selectedPayrollRows.map((student) => {
+                    const existingCycleRecord = getSemesterRecordForCycle(student, payrollCycle);
+                    const payoutType = getSemesterPayoutType(student, existingCycleRecord);
+                    const nextCycleRecord: StudentSemesterRecord = {
+                      school_year: payrollCycle.school_year,
+                      sem_number: payrollCycle.sem_number,
+                      cycle_key: payrollCycle.cycle_key,
+                      payout_type: payoutType,
+                      payroll_status: "payrolled",
+                      renewal_status: "payrolled",
+                      payroll_id: payrollId,
+                      payroll_record_type: payoutRecordTypeForCycle(student, payrollCycle),
+                      payrolled_at: createdAt,
+                      payrolled_by_uid: currentUser.uid,
+                      payrolled_by_email: currentUser.email,
+                      initial_payout_requirements: getSemesterInitialPayoutRequirements(existingCycleRecord),
+                      renewal_requirements: getSemesterRenewalRequirements(existingCycleRecord),
+                      requirements: getSemesterRenewalRequirements(existingCycleRecord),
+                      created_at: existingCycleRecord?.created_at || createdAt,
+                      updated_at: createdAt,
+                      updated_by_uid: currentUser.uid,
+                      updated_by_email: currentUser.email,
+                      notes: existingCycleRecord?.notes || ""
+                    };
+
+                    return updateStudent(student.student_id, {
+                      payrolled: hasInitialPayroll(student) || payoutType === "initial",
+                      payrolled_at: student.payrolled_at || createdAt,
+                      semester_records: replaceSemesterRecord(getSemesterRecords(student), nextCycleRecord)
+                    });
+            })
           )
         ]);
 
@@ -862,6 +2122,21 @@ export function AppShell({
         );
         setSelectedPayrollIds(new Set());
         return exportedGroupCount;
+      });
+      void recordOperation({
+        action: "export",
+        entity: "payroll",
+        entity_id: payrollId,
+        summary: `Created ${payrollTab === "new" ? "new" : "renewal"} payroll ${payrollId} for ${selectedPayrollRows.length} student${selectedPayrollRows.length === 1 ? "" : "s"}.`,
+        metadata: {
+          payroll_id: payrollId,
+          cycle_key: payrollCycle.cycle_key,
+          school_year: payrollCycle.school_year,
+          sem_number: payrollCycle.sem_number,
+          student_count: selectedPayrollRows.length,
+          group_count: groupCount,
+          student_ids: selectedPayrollRows.map((student) => student.student_id)
+        }
       });
       showNotice(`Created payroll ${payrollId} for ${selectedPayrollRows.length} student${selectedPayrollRows.length === 1 ? "" : "s"} across ${groupCount} file group${groupCount === 1 ? "" : "s"}.`);
     } catch (error) {
@@ -874,13 +2149,41 @@ export function AppShell({
       case "dashboard":
         return (
           <div className="content-stack">
-            <SectionHeader eyebrow="Overview" title="Student Information System" description="A flat operational workspace for scholarship records, renewals, payroll preparation, and user maintenance." />
+            <SectionHeader
+              eyebrow="Overview"
+              title="Student Information System"
+              description={
+                isAdmin
+                  ? "A flat operational workspace for scholarship records, renewals, payroll preparation, and user maintenance."
+                  : "A focused workspace for scholarship records, registration, and semester requirements."
+              }
+            />
             <div className="stat-grid">
               <StatCard label="Total Scholars" value={stats.total} note="Active student records" />
               <StatCard label="Claimed" value={stats.claimed} note="Students with released subsidy" />
-              <StatCard label="Pending Renewals" value={stats.renewedPending} note="Prior claimants not yet renewed" />
-              <StatCard label="Trash" value={stats.trash} note="Archived records awaiting restore or deletion" />
+              {isAdmin ? <StatCard label="Payroll Candidates" value={stats.renewedPending} note="Qualified and unpaid for the current cycle" /> : null}
+              {isAdmin ? <StatCard label="Trash" value={stats.trash} note="Archived records awaiting restore or deletion" /> : null}
             </div>
+            <Surface
+              title="Recent Operations"
+              subtitle={
+                isAdmin
+                  ? "Latest tracked inserts, updates, deletes, restores, and payroll exports."
+                  : "Latest tracked inserts, updates, deletes, and restores available to your role."
+              }
+            >
+              <DataTable
+                columns={[
+                  { key: "action", label: "Action", render: (record) => record.action.toUpperCase() },
+                  { key: "target", label: "Target", render: (record) => record.entity },
+                  { key: "summary", label: "Summary", render: (record) => record.summary },
+                  { key: "actor", label: "By", render: (record) => record.actor_email || record.actor_name || "Unknown" },
+                  { key: "created", label: "When", render: (record) => formatDateTime(record.created_at) }
+                ]}
+                rows={operationLogs.slice(0, 8)}
+                getRowKey={(record) => record.id}
+              />
+            </Surface>
             <Surface title="Recent Students" subtitle="The latest student records currently visible in the system.">
               <DataTable
                 columns={[
@@ -888,7 +2191,7 @@ export function AppShell({
                   { key: "name", label: "Student", render: (student) => student.full_name },
                   { key: "school", label: "School", render: (student) => student.school_address || "—" },
                   { key: "course", label: "Course", render: (student) => student.school_course || "—" },
-                  { key: "documents", label: "Documents", render: (student) => completionStatus(student) }
+                  { key: "requirements", label: "Requirements", render: (student) => completionStatus(student) }
                 ]}
                 rows={students.slice(0, 8)}
                 getRowKey={(student) => student.student_id}
@@ -899,21 +2202,30 @@ export function AppShell({
       case "register":
         return (
           <div className="content-stack">
-            <SectionHeader eyebrow="Registry" title={studentEditId ? "Edit Student" : "Register Student"} description="Create or update scholarship student records without leaving the rail layout." />
+            <SectionHeader
+              eyebrow="Registry"
+              title={studentEditId ? "Edit Student" : "Register Student"}
+              description={studentEditId ? "Update scholarship student records without leaving the rail layout." : "Create scholarship student records without leaving the rail layout."}
+            />
             <Surface
               title={studentEditId ? "Student Details" : "New Student"}
-              subtitle="This form covers the same student fields the legacy static app used for registry and document tracking."
+              subtitle="This form captures the student profile and the full requirements checklist used to review eligibility."
               actions={
-                studentEditId ? (
+                <div className="button-row">
+                  {studentEditId ? (
+                    <button type="button" className="secondary-button" onClick={resetStudentForm}>
+                      Reset Form
+                    </button>
+                  ) : null}
                   <button type="button" className="secondary-button" onClick={resetStudentForm}>
-                    Reset Form
+                    Clear Draft
                   </button>
-                ) : null
+                </div>
               }
             >
-              <form className="form-grid" onSubmit={handleStudentSubmit}>
+              <form className="form-grid" onSubmit={handleStudentSubmit} noValidate>
                 <Field label="Full Name">
-                  <input value={studentDraft.full_name} onChange={(event) => patchStudentDraft({ full_name: event.currentTarget.value })} required />
+                  <input value={studentDraft.full_name} onChange={(event) => patchStudentDraft({ full_name: event.currentTarget.value })} />
                 </Field>
                 <Field label="Student Number">
                   <input value={studentDraft.student_number} onChange={(event) => patchStudentDraft({ student_number: event.currentTarget.value })} />
@@ -959,7 +2271,7 @@ export function AppShell({
                 <Field label="Phone">
                   <input value={studentDraft.phone_number} onChange={(event) => patchStudentDraft({ phone_number: event.currentTarget.value })} />
                 </Field>
-                <DocumentChecklist draft={studentDraft} onChange={patchStudentDraft} />
+                <RequirementsChecklist draft={studentDraft} onRequirementChange={patchStudentRequirement} />
                 <div className="form-actions">
                   <button type="submit" className="primary-button" disabled={busyKey === "student-submit"}>
                     {busyKey === "student-submit" ? "Saving..." : studentEditId ? "Update Student" : "Create Student"}
@@ -981,6 +2293,7 @@ export function AppShell({
               status={statusFilter}
               batch={batchFilter}
               batchOptions={batchOptions}
+              showAdminStatusFilters={isAdmin}
               onSearchChange={setSearch}
               onStatusChange={setStatusFilter}
               onBatchChange={setBatchFilter}
@@ -993,25 +2306,37 @@ export function AppShell({
                   { key: "school", label: "School", render: (student) => student.school_address || "—" },
                   { key: "course", label: "Course", render: (student) => student.school_course || "—" },
                   { key: "batch", label: "Batch", render: (student) => student.batch || "—" },
-                  { key: "completion", label: "Documents", render: (student) => completionStatus(student) },
+                  { key: "completion", label: "Requirements", render: (student) => completionStatus(student) },
                   {
                     key: "renewals",
                     label: "Renewals",
                     render: (student) => renewalHistoryCount(student)
                   },
                   {
-                    key: "payrolls",
-                    label: "Payrolls",
+                    key: "requirements_count",
+                    label: "Ready",
                     render: (student) => {
-                      const summary = payrollSummaryByStudent.get(student.student_id);
-                      return (
-                        <div className="payroll-summary-cell">
-                          <strong>{summary?.count || 0}</strong>
-                          <span>{summary?.amount ? `PHP ${summary.amount.toLocaleString()}` : "No payroll yet"}</span>
-                        </div>
-                      );
+                      const requirements = getStudentRequirements(student);
+                      return `${requirementCompletionCount(requirements)}/${requirementFields.length}`;
                     }
                   },
+                  ...(isAdmin
+                    ? [
+                        {
+                          key: "payrolls",
+                          label: "Payrolls",
+                          render: (student: Student) => {
+                            const summary = payrollSummaryByStudent.get(student.student_id);
+                            return (
+                              <div className="payroll-summary-cell">
+                                <strong>{summary?.count || 0}</strong>
+                                <span>{summary?.amount ? `PHP ${summary.amount.toLocaleString()}` : "No payroll yet"}</span>
+                              </div>
+                            );
+                          }
+                        }
+                      ]
+                    : []),
                   {
                     key: "actions",
                     label: "Actions",
@@ -1026,85 +2351,197 @@ export function AppShell({
                 getRowKey={(student) => student.student_id}
               />
             </Surface>
-            <Surface
-              title="Payroll History Lookup"
-              subtitle={
-                selectedPayrollHistoryStudent
-                  ? `${payrollHistoryRows.length} payroll record${payrollHistoryRows.length === 1 ? "" : "s"} for ${selectedPayrollHistoryStudent.full_name}.`
-                  : "Select a student to review payroll traces written during payroll creation."
-              }
-            >
-              <div className="inline-form payroll-history-controls">
-                <div className="search-select">
-                  <input
-                    type="search"
-                    value={payrollHistoryQuery}
-                    placeholder="Search student name, ID, number, school, course, batch"
-                    onFocus={() => setPayrollHistoryMenuOpen(true)}
-                    onBlur={() => {
-                      window.setTimeout(() => setPayrollHistoryMenuOpen(false), 120);
-                    }}
-                    onChange={(event) => {
-                      setPayrollHistoryQuery(event.currentTarget.value);
+            {isAdmin ? (
+              <Surface
+                title="Payroll History Lookup"
+                subtitle={
+                  selectedPayrollHistoryStudent
+                    ? `${payrollHistoryRows.length} payroll record${payrollHistoryRows.length === 1 ? "" : "s"} for ${selectedPayrollHistoryStudent.full_name}.`
+                    : "Select a student to review payroll traces after confirming the requirements and renewal flow."
+                }
+              >
+                <div className="inline-form payroll-history-controls">
+                  <div className="search-select">
+                    <input
+                      type="search"
+                      value={payrollHistoryQuery}
+                      placeholder="Search student name, ID, number, school, course, batch"
+                      onFocus={() => setPayrollHistoryMenuOpen(true)}
+                      onBlur={() => {
+                        window.setTimeout(() => setPayrollHistoryMenuOpen(false), 120);
+                      }}
+                      onChange={(event) => {
+                        setPayrollHistoryQuery(event.currentTarget.value);
+                        setPayrollHistoryStudentId("");
+                        setPayrollHistoryMenuOpen(true);
+                      }}
+                    />
+                    {payrollHistoryMenuOpen ? (
+                      <div className="search-select-menu" role="listbox" aria-label="Payroll history students">
+                        {payrollHistorySearchResults.length ? (
+                          payrollHistorySearchResults.map((student) => (
+                            <button
+                              key={student.student_id}
+                              type="button"
+                              className="search-select-option"
+                              onMouseDown={(event) => event.preventDefault()}
+                              onClick={() => selectPayrollHistoryStudent(student)}
+                            >
+                              <strong>{student.full_name}</strong>
+                              <span>
+                                {student.student_id}
+                                {student.batch ? ` • Batch ${student.batch}` : ""}
+                                {student.school_course ? ` • ${student.school_course}` : ""}
+                              </span>
+                            </button>
+                          ))
+                        ) : (
+                          <div className="search-select-empty">No students matched that search.</div>
+                        )}
+                      </div>
+                    ) : null}
+                  </div>
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    onClick={() => {
                       setPayrollHistoryStudentId("");
-                      setPayrollHistoryMenuOpen(true);
+                      setPayrollHistoryQuery("");
+                      setPayrollHistoryMenuOpen(false);
                     }}
-                  />
-                  {payrollHistoryMenuOpen ? (
-                    <div className="search-select-menu" role="listbox" aria-label="Payroll history students">
-                      {payrollHistorySearchResults.length ? (
-                        payrollHistorySearchResults.map((student) => (
-                          <button
-                            key={student.student_id}
-                            type="button"
-                            className="search-select-option"
-                            onMouseDown={(event) => event.preventDefault()}
-                            onClick={() => selectPayrollHistoryStudent(student)}
-                          >
-                            <strong>{student.full_name}</strong>
-                            <span>
-                              {student.student_id}
-                              {student.batch ? ` • Batch ${student.batch}` : ""}
-                              {student.school_course ? ` • ${student.school_course}` : ""}
-                            </span>
-                          </button>
-                        ))
-                      ) : (
-                        <div className="search-select-empty">No students matched that search.</div>
-                      )}
-                    </div>
-                  ) : null}
+                  >
+                    Clear
+                  </button>
                 </div>
-                <button
-                  type="button"
-                  className="secondary-button"
-                  onClick={() => {
-                    setPayrollHistoryStudentId("");
-                    setPayrollHistoryQuery("");
-                    setPayrollHistoryMenuOpen(false);
-                  }}
-                >
-                  Clear
-                </button>
-              </div>
-              <DataTable
-                columns={[
-                  { key: "created", label: "Created", render: (record) => formatDateTime(record.created_at) },
-                  { key: "payroll", label: "Payroll", render: (record) => record.payroll_id || record.id },
-                  { key: "batch", label: "Batch", render: (record) => record.batch || "—" },
-                  { key: "amount", label: "Amount", render: (record) => Number(record.amount || 0).toLocaleString() }
-                ]}
-                rows={payrollHistoryRows}
-                getRowKey={(record) => record.id}
-              />
-            </Surface>
+                <DataTable
+                  columns={[
+                    { key: "created", label: "Created", render: (record) => formatDateTime(record.created_at) },
+                    { key: "payroll", label: "Payroll", render: (record) => record.payroll_id || record.id },
+                    { key: "batch", label: "Batch", render: (record) => record.batch || "—" },
+                    { key: "amount", label: "Amount", render: (record) => Number(record.amount || 0).toLocaleString() }
+                  ]}
+                  rows={payrollHistoryRows}
+                  getRowKey={(record) => record.id}
+                />
+              </Surface>
+            ) : null}
           </div>
         );
-      case "renewal":
+      case "requirements":
         return (
           <div className="content-stack">
-            <SectionHeader eyebrow="Renewal" title="Renewal Tracking" description="Track prior claimants and mark renewal progress without leaving the table." />
-            <Surface title="Renewal Queue" subtitle={`${renewalRows.length} students have renewal scope or renewal history.`}>
+            <SectionHeader
+              eyebrow="Requirements"
+              title="Requirements Timeline"
+              description={
+                isAdmin
+                  ? "Manage student requirements by school year and semester, then move records from non-payrolled to payrolled when payroll is ready."
+                  : "Manage student requirements by school year and semester from one focused workspace."
+              }
+            />
+            <Surface
+              title="School Year Timeline"
+              subtitle="Scroll sideways to move through generated school years."
+            >
+              <div className="requirements-timeline-shell">
+                <div className="school-year-timeline" aria-label="School year selector">
+                  {schoolYearOptions.map((schoolYear, index) => (
+                    <div key={schoolYear} className="school-year-step">
+                      <button
+                        type="button"
+                        className={schoolYear === requirementsCycle.school_year ? "active" : ""}
+                        onClick={() => setRequirementsSchoolYear(schoolYear)}
+                      >
+                        {schoolYear}
+                      </button>
+                      {index < schoolYearOptions.length - 1 ? <span aria-hidden="true" /> : null}
+                    </div>
+                  ))}
+                </div>
+                <div className="semester-spinner" aria-label="Semester selector">
+                  <label htmlFor="requirementsSemesterSelect">Semester</label>
+                  <select
+                    id="requirementsSemesterSelect"
+                    value={String(requirementsSemesterNumber)}
+                    onChange={(event) => setRequirementsSemester(event.currentTarget.value)}
+                  >
+                    <option value="1">1st Semester</option>
+                    <option value="2">2nd Semester</option>
+                  </select>
+                </div>
+              </div>
+            </Surface>
+            <Surface
+              title="Requirement Management"
+              subtitle={
+                isAdmin
+                  ? `${requirementRows.length} ${requirementsTab === "payrolled" ? "payrolled" : "non-payrolled"} student${requirementRows.length === 1 ? "" : "s"} for ${semesterLabel(requirementsCycle)}.`
+                  : `${requirementRows.length} student${requirementRows.length === 1 ? "" : "s"} for ${semesterLabel(requirementsCycle)}.`
+              }
+              actions={
+                isAdmin ? (
+                  <div className="segmented-control" role="tablist" aria-label="Requirement payroll status">
+                    <button
+                      type="button"
+                      className={requirementsTab === "non-payrolled" ? "active" : ""}
+                      onClick={() => setRequirementsTab("non-payrolled")}
+                      role="tab"
+                      aria-selected={requirementsTab === "non-payrolled"}
+                    >
+                      Non-Payrolled
+                    </button>
+                    <button
+                      type="button"
+                      className={requirementsTab === "payrolled" ? "active" : ""}
+                      onClick={() => setRequirementsTab("payrolled")}
+                      role="tab"
+                      aria-selected={requirementsTab === "payrolled"}
+                    >
+                      Payrolled
+                    </button>
+                  </div>
+                ) : null
+              }
+            >
+              <div className="requirements-filter-grid">
+                <Field label="Student Name">
+                  <input
+                    type="search"
+                    value={requirementsNameFilter}
+                    placeholder="Search name"
+                    onChange={(event) => setRequirementsNameFilter(event.currentTarget.value)}
+                  />
+                </Field>
+                <Field label="School">
+                  <input
+                    type="search"
+                    value={requirementsSchoolFilter}
+                    placeholder="Search school"
+                    onChange={(event) => setRequirementsSchoolFilter(event.currentTarget.value)}
+                  />
+                </Field>
+                <Field label="Barangay">
+                  <input
+                    type="search"
+                    value={requirementsBarangayFilter}
+                    placeholder="Search barangay"
+                    onChange={(event) => setRequirementsBarangayFilter(event.currentTarget.value)}
+                  />
+                </Field>
+                <div className="requirements-filter-actions">
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    onClick={() => {
+                      setRequirementsNameFilter("");
+                      setRequirementsSchoolFilter("");
+                      setRequirementsBarangayFilter("");
+                    }}
+                  >
+                    Clear Filters
+                  </button>
+                </div>
+              </div>
               <DataTable
                 columns={[
                   { key: "id", label: "ID", render: (student) => student.student_id },
@@ -1112,16 +2549,155 @@ export function AppShell({
                   { key: "school", label: "School", render: (student) => student.school_address || "—" },
                   { key: "batch", label: "Batch", render: (student) => student.batch || "—" },
                   {
-                    key: "renewed",
-                    label: "Renewed",
-                    render: (student) => <FlagPill active={Boolean(student.renewed)} label={student.renewed ? "Renewed" : "Pending"} />
+                    key: "initial_payout_requirements",
+                    label: isAdmin ? "Initial Payout" : "Initial Requirements",
+                    render: (student) => {
+                      const record = getSemesterRecordForCycle(student, requirementsCycle);
+                      const requirements = getSemesterInitialPayoutRequirements(record);
+                      return `${requirementCompletionCount(requirements)}/${requirementFields.length}`;
+                    }
+                  },
+                  {
+                    key: "renewal_requirements",
+                    label: "Renewal",
+                    render: (student) => {
+                      const record = getSemesterRecordForCycle(student, requirementsCycle);
+                      return record
+                        ? `${renewalRequirementCompletionCount(getSemesterRenewalRequirements(record))}/${renewalRequirementFields.length}`
+                        : `0/${renewalRequirementFields.length}`;
+                    }
+                  },
+                  ...(isAdmin
+                    ? [
+                        {
+                          key: "status",
+                          label: "Payroll Qualification",
+                          render: (student: Student) => {
+                            const status = getSemesterPayrollStatus(student, requirementsCycle);
+                            return <FlagPill active={status === "qualified" || status === "payrolled"} label={qualificationLabel(student, requirementsCycle)} />;
+                          }
+                        }
+                      ]
+                    : []),
+                  {
+                    key: "actions",
+                    label: "Actions",
+                    render: (student) => (
+                      <button type="button" className="action-button" onClick={() => openRenewalRecord(student, requirementsCycle)}>
+                        Manage Requirements
+                      </button>
+                    )
+                  }
+                ]}
+                rows={requirementRows}
+                getRowKey={(student) => student.student_id}
+              />
+            </Surface>
+          </div>
+        );
+      case "renewal":
+        return (
+          <div className="content-stack">
+            <SectionHeader eyebrow="Renewal" title="Cycle Requirements" description="Track one renewal record per student, per school year and semester, with the semester-specific requirements attached to that cycle." />
+            <Surface
+              title="Current Cycle"
+              subtitle={`Active cycle: ${semesterLabel(currentCycle)}. Renewal requirements for this cycle are Liquidation, Proof of Enrollment, and Latest Grades.`}
+            >
+              <div className="form-grid">
+                <Field label="School Year">
+                  <input
+                    value={currentCycleDraft.school_year}
+                    onChange={(event) => patchCurrentCycleDraft({ school_year: event.currentTarget.value })}
+                    disabled={!isAdmin}
+                    placeholder="2026-2027"
+                  />
+                </Field>
+                <Field label="Semester Number">
+                  <select
+                    value={currentCycleDraft.sem_number}
+                    onChange={(event) => patchCurrentCycleDraft({ sem_number: event.currentTarget.value })}
+                    disabled={!isAdmin}
+                  >
+                    <option value="1">1st Semester</option>
+                    <option value="2">2nd Semester</option>
+                  </select>
+                </Field>
+                <Field label="Cycle Status">
+                  <select
+                    value={currentCycleDraft.status}
+                    onChange={(event) =>
+                      patchCurrentCycleDraft({
+                        status: event.currentTarget.value as CurrentCycleConfig["status"]
+                      })
+                    }
+                    disabled={!isAdmin}
+                  >
+                    <option value="open">Open</option>
+                    <option value="locked">Locked</option>
+                    <option value="archived">Archived</option>
+                  </select>
+                </Field>
+                <Field label="Cycle Key">
+                  <input value={currentCycle.cycle_key} disabled />
+                </Field>
+                {isAdmin ? (
+                  <div className="form-actions">
+                    <button
+                      type="button"
+                      className="primary-button"
+                      onClick={handleSaveCurrentCycle}
+                      disabled={busyKey === "save-current-cycle"}
+                    >
+                      {busyKey === "save-current-cycle" ? "Saving..." : "Save Current Cycle"}
+                    </button>
+                  </div>
+                ) : null}
+              </div>
+            </Surface>
+            <Surface title="Renewal Queue" subtitle={`${renewalRows.length} students have renewal scope or renewal history for review in ${semesterLabel(currentCycle)}.`}>
+              <DataTable
+                columns={[
+                  { key: "id", label: "ID", render: (student) => student.student_id },
+                  { key: "name", label: "Student", render: (student) => student.full_name },
+                  { key: "school", label: "School", render: (student) => student.school_address || "—" },
+                  { key: "batch", label: "Batch", render: (student) => student.batch || "—" },
+                  {
+                    key: "profile_requirements",
+                    label: "Profile Requirements",
+                    render: (student) => {
+                      const requirements = getStudentRequirements(student);
+                      return `${requirementCompletionCount(requirements)}/${requirementFields.length}`;
+                    }
+                  },
+                  {
+                    key: "cycle_requirements",
+                    label: "Cycle Requirements",
+                    render: (student) => {
+                      const record = getSemesterRecordForCycle(student, currentCycle);
+                      return record
+                        ? `${renewalRequirementCompletionCount(getSemesterRenewalRequirements(record))}/${renewalRequirementFields.length}`
+                        : `0/${renewalRequirementFields.length}`;
+                    }
+                  },
+                  {
+                    key: "cycle_status",
+                    label: "Payroll Qualification",
+                    render: (student) => {
+                      const status = getSemesterPayrollStatus(student, currentCycle);
+                      return (
+                        <FlagPill
+                          active={status === "qualified" || status === "payrolled"}
+                          label={qualificationLabel(student, currentCycle)}
+                        />
+                      );
+                    }
                   },
                   {
                     key: "actions",
                     label: "Actions",
                     render: (student) => (
-                      <button type="button" className="action-button" onClick={() => handleStudentFlagUpdate(student, "renewed")}>
-                        {student.renewed ? "Mark Pending" : "Mark Renewed"}
+                      <button type="button" className="action-button" onClick={() => openRenewalRecord(student)}>
+                        Review Cycle Record
                       </button>
                     )
                   }
@@ -1137,7 +2713,7 @@ export function AppShell({
           <div className="content-stack">
             <SectionHeader eyebrow="Users" title="Managed Users" description="Create, update, and remove Firebase Auth users with the same admin role model used by the legacy app." />
             <Surface title={managedUserEditId ? "Update User" : "Create User"} subtitle="Admin claims are applied in the backend when users are created.">
-              <form className="form-grid" onSubmit={handleManagedUserSubmit}>
+              <form className="form-grid" onSubmit={handleManagedUserSubmit} noValidate>
                 <Field label="Email">
                   <input
                     type="email"
@@ -1147,7 +2723,6 @@ export function AppShell({
                       setManagedUserDraft((current) => ({ ...current, email: value }));
                     }}
                     disabled={Boolean(managedUserEditId)}
-                    required
                   />
                 </Field>
                 <Field label="Display Name">
@@ -1167,7 +2742,6 @@ export function AppShell({
                       const value = event.currentTarget.value;
                       setManagedUserDraft((current) => ({ ...current, password: value }));
                     }}
-                    required={!managedUserEditId}
                   />
                 </Field>
                 <Field label="Role">
@@ -1323,15 +2897,38 @@ export function AppShell({
         return (
           <div className="content-stack">
             <SectionHeader eyebrow="Payrolls" title="Payrolls" description="Generate payroll files and record each payroll as its own preparation event." />
-            <FilterBar
-              search={search}
-              status={statusFilter}
-              batch={batchFilter}
-              batchOptions={batchOptions}
-              onSearchChange={setSearch}
-              onStatusChange={setStatusFilter}
-              onBatchChange={setBatchFilter}
-            />
+            <Surface
+              title="Payout Timeline"
+              subtitle="Choose the school year and semester for payroll qualification and document generation."
+            >
+              <div className="requirements-timeline-shell">
+                <div className="school-year-timeline" aria-label="Payroll school year selector">
+                  {payrollSchoolYearOptions.map((schoolYear, index) => (
+                    <div key={schoolYear} className="school-year-step">
+                      <button
+                        type="button"
+                        className={schoolYear === payrollCycle.school_year ? "active" : ""}
+                        onClick={() => setPayrollSchoolYear(schoolYear)}
+                      >
+                        {schoolYear}
+                      </button>
+                      {index < payrollSchoolYearOptions.length - 1 ? <span aria-hidden="true" /> : null}
+                    </div>
+                  ))}
+                </div>
+                <div className="semester-spinner" aria-label="Payroll semester selector">
+                  <label htmlFor="payrollSemesterSelect">Semester</label>
+                  <select
+                    id="payrollSemesterSelect"
+                    value={String(payrollSemesterNumber)}
+                    onChange={(event) => setPayrollSemester(event.currentTarget.value)}
+                  >
+                    <option value="1">1st Semester</option>
+                    <option value="2">2nd Semester</option>
+                  </select>
+                </div>
+              </div>
+            </Surface>
             <Surface
               title="Payroll Scope"
               subtitle={`${stats.payrollRecords} payroll records are currently loaded.`}
@@ -1339,34 +2936,32 @@ export function AppShell({
               <div className="segmented-control payroll-tabs" role="tablist" aria-label="Payroll student scope">
                 <button
                   type="button"
-                  className={payrollTab === "unpayrolled" ? "active" : ""}
-                  onClick={() => setPayrollTab("unpayrolled")}
+                  className={payrollTab === "new" ? "active" : ""}
+                  onClick={() => setPayrollTab("new")}
                   role="tab"
-                  aria-selected={payrollTab === "unpayrolled"}
+                  aria-selected={payrollTab === "new"}
                 >
-                  No Payrolled Students
+                  New
                 </button>
                 <button
                   type="button"
-                  className={payrollTab === "renewed" ? "active" : ""}
-                  onClick={() => setPayrollTab("renewed")}
+                  className={payrollTab === "renewal" ? "active" : ""}
+                  onClick={() => setPayrollTab("renewal")}
                   role="tab"
-                  aria-selected={payrollTab === "renewed"}
+                  aria-selected={payrollTab === "renewal"}
                 >
-                  Renewed Students
+                  Renewal
                 </button>
               </div>
             </Surface>
             <Surface
-              title={payrollTab === "unpayrolled" ? "No Payrolled Students Payroll Controls" : "Renewed Students Payroll Controls"}
+              title={payrollTab === "new" ? "New Payroll" : "Renewal Payroll"}
               subtitle={
-                payrollTab === "unpayrolled"
-                  ? `${selectedPayrollRows.length} students selected from ${payrollRows.length} students without payroll. Creating this payroll also marks selected students renewed.`
-                  : `${selectedPayrollRows.length} renewed students selected from ${payrollRows.length} visible rows. Creating this payroll records the payroll trace.`
+                `${selectedPayrollRows.length} students selected from ${payrollRows.length} ${payrollTab === "new" ? "new" : "renewal"} records for ${semesterLabel(payrollCycle)}.`
               }
               actions={
                 <div className="button-row">
-                  <button type="button" className="primary-button" onClick={handleExportPayroll} disabled={busyKey === "export-payroll"}>
+                  <button type="button" className="primary-button" onClick={handleExportPayroll} disabled={busyKey === "export-payroll" || hasInvalidPayrollSelection}>
                     {busyKey === "export-payroll" ? "Creating..." : "Create Payroll Files"}
                   </button>
                   <button type="button" className="secondary-button" onClick={() => exportStudentsCsv(payrollRows)}>
@@ -1381,6 +2976,55 @@ export function AppShell({
                 </div>
               }
             >
+              <div className="requirements-filter-grid payroll-filter-grid">
+                <Field label="Student Name">
+                  <input
+                    type="search"
+                    value={payrollNameFilter}
+                    placeholder="Search name"
+                    onChange={(event) => setPayrollNameFilter(event.currentTarget.value)}
+                  />
+                </Field>
+                <Field label="School">
+                  <input
+                    type="search"
+                    value={payrollSchoolFilter}
+                    placeholder="Search school"
+                    onChange={(event) => setPayrollSchoolFilter(event.currentTarget.value)}
+                  />
+                </Field>
+                <Field label="Status">
+                  <select value={payrollStatusFilter} onChange={(event) => setPayrollStatusFilter(event.currentTarget.value)}>
+                    <option value="all">All statuses</option>
+                    <option value="qualified">Payroll qualified</option>
+                    <option value="not_qualified">Not qualified</option>
+                    <option value="payrolled">Payrolled this semester</option>
+                    <option value="unpayrolled">Not payrolled this semester</option>
+                  </select>
+                </Field>
+                <Field label="Batch">
+                  <select value={payrollBatchFilter} onChange={(event) => setPayrollBatchFilter(event.currentTarget.value)}>
+                    <option value="all">All batches</option>
+                    {batchOptions.map((option) => (
+                      <option key={option} value={option}>{option}</option>
+                    ))}
+                  </select>
+                </Field>
+                <div className="requirements-filter-actions">
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    onClick={() => {
+                      setPayrollNameFilter("");
+                      setPayrollSchoolFilter("");
+                      setPayrollStatusFilter("all");
+                      setPayrollBatchFilter("all");
+                    }}
+                  >
+                    Clear
+                  </button>
+                </div>
+              </div>
               <div className="form-grid payroll-metadata-grid">
                 <Field label="Date Of Filing">
                   <input
@@ -1388,25 +3032,6 @@ export function AppShell({
                     value={payrollMetadataDraft.date_of_filing}
                     onChange={(event) => patchPayrollMetadataDraft({ date_of_filing: event.currentTarget.value })}
                   />
-                </Field>
-                <Field label="School Year">
-                  <input
-                    value={payrollMetadataDraft.school_year}
-                    onChange={(event) => patchPayrollMetadataDraft({ school_year: event.currentTarget.value })}
-                    placeholder="2025-2026"
-                  />
-                </Field>
-                <Field label="Semester Number">
-                  <select
-                    value={payrollMetadataDraft.sem_number}
-                    onChange={(event) => patchPayrollMetadataDraft({ sem_number: event.currentTarget.value })}
-                  >
-                    <option value="">Select semester</option>
-                    <option value="1">1st Semester</option>
-                    <option value="2">2nd Semester</option>
-                    <option value="3">3rd Semester</option>
-                    <option value="4">4th Semester</option>
-                  </select>
                 </Field>
               </div>
               <DataTable
@@ -1436,8 +3061,8 @@ export function AppShell({
                   { key: "year", label: "Year", render: (student) => student.year_level || "—" },
                   {
                     key: "payrolled",
-                    label: "Payrolled",
-                    render: (student) => <FlagPill active={Boolean(student.payrolled)} label={student.payrolled ? "Yes" : "No"} />
+                    label: "Qualification",
+                    render: (student) => <FlagPill active={isQualifiedForPayroll(student, payrollCycle) || isPayrolledForCycle(student, payrollCycle)} label={qualificationLabel(student, payrollCycle)} />
                   }
                 ]}
                 rows={payrollRows}
@@ -1555,7 +3180,7 @@ export function AppShell({
             aria-labelledby="record-actions-title"
             onMouseDown={(event) => event.stopPropagation()}
           >
-            <div className="action-dialog-header">
+              <div className="action-dialog-header">
               <div>
                 <p>Record Actions</p>
                 <h2 id="record-actions-title">{actionsStudent.full_name}</h2>
@@ -1571,23 +3196,27 @@ export function AppShell({
                 <strong>{yearLevelLabel(actionsStudent.year_level)}</strong>
               </div>
               <div>
-                <span>Payrolls</span>
-                <strong>{payrollSummaryByStudent.get(actionsStudent.student_id)?.count || 0}</strong>
+                <span>Requirements</span>
+                <strong>{requirementCompletionCount(getStudentRequirements(actionsStudent))}/{requirementFields.length}</strong>
               </div>
               <div>
                 <span>Renewals</span>
                 <strong>{renewalHistoryCount(actionsStudent)}</strong>
               </div>
-              <div>
-                <span>Total Amount</span>
-                <strong>PHP {(payrollSummaryByStudent.get(actionsStudent.student_id)?.amount || 0).toLocaleString()}</strong>
-              </div>
-              <div>
-                <span>Latest</span>
-                <strong>
-                  {formatDateTime(payrollSummaryByStudent.get(actionsStudent.student_id)?.latestCreatedAt)}
-                </strong>
-              </div>
+              {isAdmin ? (
+                <div>
+                  <span>Payrolls</span>
+                  <strong>{payrollSummaryByStudent.get(actionsStudent.student_id)?.count || 0}</strong>
+                </div>
+              ) : null}
+              {isAdmin ? (
+                <div>
+                  <span>Latest</span>
+                  <strong>
+                    {formatDateTime(payrollSummaryByStudent.get(actionsStudent.student_id)?.latestCreatedAt)}
+                  </strong>
+                </div>
+              ) : null}
             </div>
             <div className="dialog-history-panel">
               <div className="dialog-history-header">
@@ -1620,6 +3249,19 @@ export function AppShell({
             </div>
             <div className="dialog-history-panel">
               <div className="dialog-history-header">
+                <span>Current Requirements</span>
+                <strong>{requirementCompletionCount(getStudentRequirements(actionsStudent))}</strong>
+              </div>
+              <div className="summary-token-list">
+                {requirementFields.map((field) => (
+                  <span key={field} className={`summary-token ${getStudentRequirements(actionsStudent)[field] ? "" : "summary-token-muted"}`}>
+                    {REQUIREMENT_LABELS[field]}: {getStudentRequirements(actionsStudent)[field] ? "Ready" : "Missing"}
+                  </span>
+                ))}
+              </div>
+            </div>
+            <div className="dialog-history-panel">
+              <div className="dialog-history-header">
                 <span>Renewal History</span>
                 <strong>{actionsStudent.renewal_history?.length || 0}</strong>
               </div>
@@ -1631,8 +3273,19 @@ export function AppShell({
                     .map((entry, index) => (
                       <div key={`${entry.changed_at}-${entry.status}-${index}`} className="history-row">
                         <div>
-                          <strong>{entry.status === "renewed" ? "Marked renewed" : "Moved to pending"}</strong>
-                          <span>{entry.reason || "Renewal state updated."}</span>
+                          <strong>
+                            {entry.status === "renewed" ? "Marked renewed" : "Moved to pending"}
+                            {entry.school_year && entry.sem_number ? ` • ${semesterLabel(entry as Pick<CurrentCycleConfig, "school_year" | "sem_number">)}` : ""}
+                          </strong>
+                          <span>
+                            {entry.reason || "Renewal state updated."}
+                            {entry.requirements_snapshot
+                              ? ` ${requirementCompletionCount(entry.requirements_snapshot)}/${requirementFields.length} requirements were ready at this step.`
+                              : ""}
+                            {entry.renewal_requirements_snapshot
+                              ? ` ${renewalRequirementCompletionCount(entry.renewal_requirements_snapshot)}/${renewalRequirementFields.length} cycle renewal requirements were ready.`
+                              : ""}
+                          </span>
                         </div>
                         <div>
                           <span>{formatDateTime(entry.changed_at)}</span>
@@ -1645,27 +3298,61 @@ export function AppShell({
                 <div className="empty-history">No renewal changes have been recorded yet.</div>
               )}
             </div>
+            <div className="dialog-history-panel">
+              <div className="dialog-history-header">
+                <span>Semester Records</span>
+                <strong>{getSemesterRecords(actionsStudent).length}</strong>
+              </div>
+              {getSemesterRecords(actionsStudent).length ? (
+                <div className="history-list">
+                  {getSemesterRecords(actionsStudent)
+                    .slice()
+                    .sort((left, right) => String(right.updated_at || "").localeCompare(String(left.updated_at || "")))
+                    .map((record) => (
+                      <div key={record.cycle_key} className="history-row">
+                        <div>
+                          <strong>{semesterLabel(record)}</strong>
+                          <span>
+                            {record.payroll_status || record.renewal_status || "not_qualified"} • {renewalRequirementCompletionCount(getSemesterRenewalRequirements(record))}/{renewalRequirementFields.length} renewal requirements ready
+                          </span>
+                          {isAdmin && record.payroll_id ? <span>Payroll {record.payroll_id} • {record.payroll_record_type || "payroll"} • {formatDateTime(record.payrolled_at)}</span> : null}
+                        </div>
+                        <div>
+                          <span>{formatDateTime(record.updated_at)}</span>
+                          <span>{record.updated_by_email || "Unknown user"}</span>
+                        </div>
+                      </div>
+                    ))}
+                </div>
+              ) : (
+                <div className="empty-history">No semester-bound renewal records have been created yet.</div>
+              )}
+            </div>
             <div className="dialog-action-grid">
-              <button
-                type="button"
-                className="secondary-button"
-                onClick={() => {
-                  fillStudentDraft(actionsStudent);
-                  setActionsStudentId("");
-                }}
-              >
-                Edit Student
-              </button>
-              <button
-                type="button"
-                className="secondary-button"
-                onClick={() => {
-                  setPayrollHistoryStudentId(actionsStudent.student_id);
-                  setActionsStudentId("");
-                }}
-              >
-                Show Payroll History
-              </button>
+              {isAdmin ? (
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={() => {
+                    fillStudentDraft(actionsStudent);
+                    setActionsStudentId("");
+                  }}
+                >
+                  Edit Student
+                </button>
+              ) : null}
+              {isAdmin ? (
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={() => {
+                    setPayrollHistoryStudentId(actionsStudent.student_id);
+                    setActionsStudentId("");
+                  }}
+                >
+                  Show Payroll History
+                </button>
+              ) : null}
               {isAdmin ? (
                 <button
                   type="button"
@@ -1683,6 +3370,310 @@ export function AppShell({
         </div>
       ) : null}
 
+      {validationDialog ? (
+        <div className="modal-backdrop" role="presentation" onMouseDown={() => setValidationDialog(null)}>
+          <div
+            className="action-dialog confirmation-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="validation-dialog-title"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <div className="action-dialog-header">
+              <div>
+                <p>Missing Fields</p>
+                <h2 id="validation-dialog-title">{validationDialog.title}</h2>
+                <span>{validationDialog.message}</span>
+              </div>
+              <button type="button" className="icon-button" onClick={() => setValidationDialog(null)} aria-label="Close missing fields dialog">
+                <X size={18} />
+              </button>
+            </div>
+            <div className="dialog-history-panel">
+              <div className="dialog-history-header">
+                <span>Still Needed</span>
+                <strong>{validationDialog.fields.length}</strong>
+              </div>
+              <div className="summary-token-list">
+                {validationDialog.fields.map((field) => (
+                  <span key={field} className="summary-token">{field}</span>
+                ))}
+              </div>
+            </div>
+            <div className="dialog-action-grid">
+              <button type="button" className="primary-button" onClick={() => setValidationDialog(null)}>
+                {validationDialog.acknowledgeLabel || "Okay"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {studentReviewOpen ? (
+        <div className="modal-backdrop" role="presentation" onMouseDown={() => setStudentReviewOpen(false)}>
+          <div
+            className="action-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="student-review-title"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <div className="action-dialog-header">
+              <div>
+                <p>Student Summary</p>
+                <h2 id="student-review-title">{studentEditId ? "Confirm Student Update" : "Confirm Student Registration"}</h2>
+                <span>Review the details below before saving this student record.</span>
+              </div>
+              <button type="button" className="icon-button" onClick={() => setStudentReviewOpen(false)} aria-label="Close student summary">
+                <X size={18} />
+              </button>
+            </div>
+            <div className="dialog-history-panel">
+              <div className="student-summary-grid">
+                <SummaryItem label="Full Name" value={studentDraft.full_name} />
+                <SummaryItem label="Student Number" value={studentDraft.student_number} />
+                <SummaryItem label="Barangay" value={studentDraft.barangay} />
+                <SummaryItem label="Address" value={studentDraft.address} />
+                <SummaryItem label="School" value={studentDraft.school_address} />
+                <SummaryItem label="Course" value={studentDraft.school_course} />
+                <SummaryItem label="Year Level" value={studentDraft.year_level} />
+                <SummaryItem label="Batch" value={studentDraft.batch} />
+                <SummaryItem label="Phone" value={studentDraft.phone_number} />
+                <SummaryItem label="Requirements Ready" value={`${truthyDocumentLabels(studentDraft).length}/${requirementFields.length}`} />
+              </div>
+            </div>
+            <div className="dialog-history-panel">
+              <div className="dialog-history-header">
+                <span>Ready Requirements</span>
+                <strong>{truthyDocumentLabels(studentDraft).length}</strong>
+              </div>
+              {truthyDocumentLabels(studentDraft).length ? (
+                <div className="summary-token-list">
+                  {truthyDocumentLabels(studentDraft).map((label) => (
+                    <span key={label} className="summary-token">{label}</span>
+                  ))}
+                </div>
+              ) : (
+                <div className="empty-history">No requirements are checked yet.</div>
+              )}
+            </div>
+            <div className="dialog-action-grid">
+              <button type="button" className="secondary-button" onClick={() => setStudentReviewOpen(false)}>
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="primary-button"
+                onClick={() => {
+                  setStudentReviewOpen(false);
+                  void commitStudentSubmit();
+                }}
+                disabled={busyKey === "student-submit"}
+              >
+                {busyKey === "student-submit" ? "Saving..." : studentEditId ? "Confirm Update" : "Confirm Registration"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {renewalRecordStudent ? (
+        <div className="modal-backdrop" role="presentation" onMouseDown={closeRenewalRecord}>
+          <div
+            className="action-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="renewal-record-title"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <div className="action-dialog-header">
+              <div>
+                <p>Cycle Renewal Record</p>
+                <h2 id="renewal-record-title">{renewalRecordStudent.full_name}</h2>
+                <span>{semesterLabel(activeRenewalRecordCycle)} • {activeRenewalRecordCycle.cycle_key}</span>
+              </div>
+              <button type="button" className="icon-button" onClick={closeRenewalRecord} aria-label="Close renewal record">
+                <X size={18} />
+              </button>
+            </div>
+            <div className="action-dialog-summary">
+              <div>
+                <span>Student ID</span>
+                <strong>{renewalRecordStudent.student_id}</strong>
+              </div>
+              <div>
+                <span>Profile Requirements</span>
+                <strong>{requirementCompletionCount(getStudentRequirements(renewalRecordStudent))}/{requirementFields.length}</strong>
+              </div>
+              <div>
+                <span>{isAdmin ? "Initial Payout" : "Initial Requirements"}</span>
+                <strong>{requirementCompletionCount(renewalRecordDraft.initial_payout_requirements)}/{requirementFields.length}</strong>
+              </div>
+              <div>
+                <span>Renewal</span>
+                <strong>{renewalRequirementCompletionCount(renewalRecordDraft.renewal_requirements)}/{renewalRequirementFields.length}</strong>
+              </div>
+              {isAdmin ? (
+                <div>
+                  <span>Qualification</span>
+                  <strong>
+                    {qualificationLabelForDraft(
+                      renewalRecordStudent,
+                      getSemesterRecordForCycle(renewalRecordStudent, activeRenewalRecordCycle),
+                      renewalRecordDraft
+                    )}
+                  </strong>
+                </div>
+              ) : null}
+              <div>
+                <span>School</span>
+                <strong>{renewalRecordStudent.school_address || "Not set"}</strong>
+              </div>
+            </div>
+            <div className="dialog-history-panel">
+              <div className="dialog-history-header">
+                <span>{isAdmin ? "Initial Payout Requirements" : "Initial Requirements"}</span>
+                <div className="dialog-history-actions">
+                  <strong>{requirementCompletionCount(renewalRecordDraft.initial_payout_requirements)}</strong>
+                  <button
+                    type="button"
+                    className="secondary-button compact"
+                    onClick={() =>
+                      setAllInitialPayoutRequirements(
+                        requirementCompletionCount(renewalRecordDraft.initial_payout_requirements) !== requirementFields.length
+                      )
+                    }
+                  >
+                    {requirementCompletionCount(renewalRecordDraft.initial_payout_requirements) === requirementFields.length
+                      ? "Deselect All"
+                      : "Select All"}
+                  </button>
+                </div>
+              </div>
+              <div className="document-grid">
+                {requirementFields.map((field) => (
+                  <label key={field} className="document-check">
+                    <input
+                      type="checkbox"
+                      checked={renewalRecordDraft.initial_payout_requirements[field]}
+                      onChange={(event) => patchInitialPayoutRequirement(field, event.currentTarget.checked)}
+                    />
+                    <span>{REQUIREMENT_LABELS[field]}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+            <div className="dialog-history-panel">
+              <div className="dialog-history-header">
+                <span>Renewal Requirements</span>
+                <div className="dialog-history-actions">
+                  <strong>{renewalRequirementCompletionCount(renewalRecordDraft.renewal_requirements)}</strong>
+                  <button
+                    type="button"
+                    className="secondary-button compact"
+                    disabled={renewalRecordDraft.payout_type === "initial" || !hasInitialPayroll(renewalRecordStudent)}
+                    onClick={() =>
+                      setAllRenewalRequirements(
+                        renewalRequirementCompletionCount(renewalRecordDraft.renewal_requirements) !== renewalRequirementFields.length
+                      )
+                    }
+                  >
+                    {renewalRequirementCompletionCount(renewalRecordDraft.renewal_requirements) === renewalRequirementFields.length
+                      ? "Deselect All"
+                      : "Select All"}
+                  </button>
+                </div>
+              </div>
+              {renewalRecordDraft.payout_type === "initial" ? (
+                <div className="inline-warning">
+                  {isAdmin
+                    ? "Initial payout is selected, so renewal requirements are skipped for this first payroll."
+                    : "Renewal requirements are skipped while this student is in the initial requirements cycle."}
+                </div>
+              ) : !hasInitialPayroll(renewalRecordStudent) ? (
+                <div className="inline-warning">
+                  {isAdmin
+                    ? "Initial payroll must be recorded before these renewal requirements can be fulfilled."
+                    : "Renewal requirements stay locked until the student's initial cycle is completed by an admin."}
+                </div>
+              ) : null}
+              <div className="document-grid">
+                {renewalRequirementFields.map((field) => (
+                  <label key={field} className="document-check">
+                    <input
+                      type="checkbox"
+                      checked={renewalRecordDraft.renewal_requirements[field]}
+                      disabled={renewalRecordDraft.payout_type === "initial" || !hasInitialPayroll(renewalRecordStudent)}
+                      onChange={(event) => patchRenewalRequirement(field, event.currentTarget.checked)}
+                    />
+                    <span>{RENEWAL_REQUIREMENT_LABELS[field]}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+            <div className="dialog-history-panel">
+              <div className="form-grid">
+                <Field label="Notes" span="full">
+                  <textarea
+                    value={renewalRecordDraft.notes}
+                    onChange={(event) => patchRenewalRecordDraft({ notes: event.currentTarget.value })}
+                    placeholder="Optional notes for this semester record"
+                  />
+                </Field>
+              </div>
+            </div>
+            <div className="dialog-action-grid">
+              <button type="button" className="secondary-button" onClick={closeRenewalRecord}>
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="primary-button"
+                onClick={() => void handleSaveRenewalRecord()}
+                disabled={busyKey === `renewal-record-${renewalRecordStudent.student_id}`}
+              >
+                {busyKey === `renewal-record-${renewalRecordStudent.student_id}` ? "Saving..." : "Save Cycle Record"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {confirmation ? (
+        <div className="modal-backdrop" role="presentation" onMouseDown={() => resolveConfirmation(false)}>
+          <div
+            className="action-dialog confirmation-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="confirmation-title"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <div className="action-dialog-header">
+              <div>
+                <p>{confirmation.danger ? "Careful Action" : "Confirm Action"}</p>
+                <h2 id="confirmation-title">{confirmation.title}</h2>
+                <span>{confirmation.message}</span>
+              </div>
+              <button type="button" className="icon-button" onClick={() => resolveConfirmation(false)} aria-label="Close confirmation">
+                <X size={18} />
+              </button>
+            </div>
+            <div className="dialog-action-grid">
+              <button type="button" className="secondary-button" onClick={() => resolveConfirmation(false)}>
+                Cancel
+              </button>
+              <button
+                type="button"
+                className={confirmation.danger ? "secondary-button danger" : "primary-button"}
+                onClick={() => resolveConfirmation(true)}
+              >
+                {confirmation.confirmLabel || "Confirm"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       {isSigningOut ? (
         <div className="modal-backdrop" role="presentation">
           <div className="auth-progress-dialog" role="dialog" aria-modal="true" aria-labelledby="signout-progress-title">
@@ -1695,13 +3686,13 @@ export function AppShell({
         </div>
       ) : null}
 
-      {busyKey === "export-payroll" ? (
+      {busyKey && !isSigningOut ? (
         <div className="modal-backdrop" role="presentation">
-          <div className="auth-progress-dialog" role="dialog" aria-modal="true" aria-labelledby="payroll-progress-title">
+          <div className="auth-progress-dialog" role="dialog" aria-modal="true" aria-labelledby="operation-progress-title">
             <div className="auth-progress-spinner" aria-hidden="true" />
             <div className="auth-progress-copy">
-              <h2 id="payroll-progress-title">Creating payroll files</h2>
-              <p>Please wait while we generate the payroll documents and prepare the download.</p>
+              <h2 id="operation-progress-title">Working on it</h2>
+              <p>{busyMessage()}</p>
             </div>
           </div>
         </div>
@@ -1780,26 +3771,26 @@ function Field({
   );
 }
 
-function DocumentChecklist({
+function RequirementsChecklist({
   draft,
-  onChange
+  onRequirementChange
 }: {
   draft: StudentDraft;
-  onChange: (student: Partial<StudentDraft>) => void;
+  onRequirementChange: (field: StudentRequirementKey, checked: boolean) => void;
 }) {
   return (
     <div className="document-grid">
-      {documentFields.map((field) => (
+      {requirementFields.map((field) => (
         <label key={field} className="document-check">
           <input
             type="checkbox"
-            checked={draft[field]}
+            checked={draft.requirements[field]}
             onChange={(event) => {
               const checked = event.currentTarget.checked;
-              onChange({ [field]: checked });
+              onRequirementChange(field, checked);
             }}
           />
-          <span>{field.replaceAll("_", " ")}</span>
+          <span>{REQUIREMENT_LABELS[field]}</span>
         </label>
       ))}
     </div>
@@ -1811,6 +3802,7 @@ function FilterBar({
   status,
   batch,
   batchOptions,
+  showAdminStatusFilters,
   onSearchChange,
   onStatusChange,
   onBatchChange
@@ -1819,6 +3811,7 @@ function FilterBar({
   status: string;
   batch: string;
   batchOptions: string[];
+  showAdminStatusFilters: boolean;
   onSearchChange: (value: string) => void;
   onStatusChange: (value: string) => void;
   onBatchChange: (value: string) => void;
@@ -1828,12 +3821,16 @@ function FilterBar({
       <input type="search" value={search} placeholder="Search name, ID, school, course, batch" onChange={(event) => onSearchChange(event.currentTarget.value)} />
       <select value={status} onChange={(event) => onStatusChange(event.currentTarget.value)}>
         <option value="all">All statuses</option>
-        <option value="complete">Complete documents</option>
-        <option value="incomplete">Incomplete documents</option>
-        <option value="renewed">Renewed</option>
-        <option value="unrenewed">Unrenewed</option>
-        <option value="payrolled">Payroll prepared</option>
-        <option value="unpayrolled">Payroll not prepared</option>
+        <option value="complete">Complete requirements</option>
+        <option value="incomplete">Incomplete requirements</option>
+        {showAdminStatusFilters ? (
+          <>
+            <option value="renewed">Payroll qualified</option>
+            <option value="unrenewed">Not qualified</option>
+            <option value="payrolled">Payroll prepared</option>
+            <option value="unpayrolled">Payroll not prepared</option>
+          </>
+        ) : null}
       </select>
       <select value={batch} onChange={(event) => onBatchChange(event.currentTarget.value)}>
         <option value="all">All batches</option>
@@ -1929,4 +3926,13 @@ function DataTable<T>({
 
 function FlagPill({ active, label }: { active: boolean; label: string }) {
   return <span className={`flag-pill ${active ? "active" : ""}`}>{label}</span>;
+}
+
+function SummaryItem({ label, value }: { label: string; value?: string }) {
+  return (
+    <div className="summary-item">
+      <span>{label}</span>
+      <strong>{String(value || "").trim() || "Not provided"}</strong>
+    </div>
+  );
 }

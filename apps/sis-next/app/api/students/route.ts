@@ -1,6 +1,6 @@
 import { createStudent, listStudents } from "../../lib/server/repositories/students";
 import { jsonError } from "../../lib/shared/http";
-import { requireAdminForApi, requireSessionUserForApi } from "../../lib/server/auth";
+import { requireSessionUserForApi } from "../../lib/server/auth";
 import type { StudentInput } from "../../lib/shared/student";
 
 export async function GET() {
@@ -15,7 +15,7 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
-    const user = await requireAdminForApi();
+    const user = await requireSessionUserForApi();
     const body = (await request.json()) as { student?: StudentInput };
     const student = await createStudent(body.student || {}, user);
     return Response.json({ student }, { status: 201 });

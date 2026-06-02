@@ -3,11 +3,15 @@ import "server-only";
 import { headers } from "next/headers";
 import { collection, getDocs } from "firebase/firestore/lite";
 import { COLLECTIONS } from "../shared/collections";
+import type { CurrentCycleConfig } from "../shared/current-cycle";
 import type { AppInitialData } from "../client/api-client";
+import type { OperationLog } from "../shared/operation-log";
 import type { PayoutRecord } from "../shared/payout-record";
 import type { Student } from "../shared/student";
 import { listOptions, listSchoolCourses } from "./repositories/options";
+import { listOperationLogs } from "./repositories/operation-logs";
 import { listPayoutRecords } from "./repositories/payout-records";
+import { getCurrentCycleConfig } from "./repositories/system-config";
 import { listStudents, listTrash } from "./repositories/students";
 import type { SessionUser } from "../shared/user";
 import { getAuthIdTokenFromHeaders } from "./auth";
@@ -44,18 +48,24 @@ async function listCollectionWithServerApp<T>(collectionName: string, authIdToke
 }
 
 export async function getAppInitialData(user: SessionUser) {
-  const shouldUseServerAppReads = !isDevAppEnv() && !isAdminRole(user.claims.role) && user.claims.admin !== true;
+  const isAdmin = isAdminRole(user.claims.role) || user.claims.admin === true;
+  const shouldUseServerAppReads = !isDevAppEnv() && !isAdmin;
   const authIdToken = shouldUseServerAppReads ? await getAuthIdTokenFromHeaders() : null;
-  const [serverAppStudents, serverAppPayoutRecords] = await Promise.all([
+  const [serverAppStudents, serverAppPayoutRecords, serverAppOperationLogs] = await Promise.all([
     listCollectionWithServerApp<Student>(COLLECTIONS.students, authIdToken),
-    listCollectionWithServerApp<PayoutRecord>(COLLECTIONS.payoutRecords, authIdToken)
+    isAdmin ? listCollectionWithServerApp<PayoutRecord>(COLLECTIONS.payoutRecords, authIdToken) : Promise.resolve(null),
+    listCollectionWithServerApp<OperationLog>(COLLECTIONS.operationLogs, authIdToken)
   ]);
 
-  const [students, trash, payoutRecords, barangays, schools, courses, batches, schoolCourses] =
+  const [students, trash, payoutRecords, operationLogs, currentCycle, barangays, schools, courses, batches, schoolCourses] =
     await Promise.all([
       serverAppStudents ?? listStudents(),
-      user.claims.admin ? listTrash() : Promise.resolve([]),
-      serverAppPayoutRecords ?? listPayoutRecords(),
+      isAdmin ? listTrash() : Promise.resolve([]),
+      isAdmin ? serverAppPayoutRecords ?? listPayoutRecords() : Promise.resolve([]),
+      isAdmin
+        ? serverAppOperationLogs ?? listOperationLogs()
+        : (serverAppOperationLogs ?? await listOperationLogs()).filter((record) => record.entity !== "payroll"),
+      getCurrentCycleConfig(),
       listOptions("barangays"),
       listOptions("schools"),
       listOptions("courses"),
@@ -65,9 +75,11 @@ export async function getAppInitialData(user: SessionUser) {
 
   const initialData: AppInitialData = {
     user,
+    currentCycle: currentCycle as CurrentCycleConfig,
     students,
     trash,
     payoutRecords,
+    operationLogs,
     options: {
       barangays,
       schools,

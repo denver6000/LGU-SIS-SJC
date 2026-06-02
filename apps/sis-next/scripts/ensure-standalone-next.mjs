@@ -8,6 +8,10 @@ const standaloneRoot = path.join(appRoot, ".next", "standalone");
 const target = path.join(standaloneRoot, "node_modules", "next");
 const serverVendorChunksSource = path.join(appRoot, ".next", "server", "vendor-chunks");
 const serverVendorChunksTarget = path.join(standaloneRoot, ".next", "server", "vendor-chunks");
+const publicSource = path.join(appRoot, "public");
+const publicTarget = path.join(standaloneRoot, "public");
+const staticSource = path.join(appRoot, ".next", "static");
+const staticTarget = path.join(standaloneRoot, ".next", "static");
 
 if (!existsSync(standaloneRoot)) {
   process.exit(0);
@@ -26,4 +30,16 @@ if (existsSync(serverVendorChunksSource) && !existsSync(serverVendorChunksTarget
   mkdirSync(path.dirname(serverVendorChunksTarget), { recursive: true });
   cpSync(serverVendorChunksSource, serverVendorChunksTarget, { recursive: true });
   console.log(`Copied vendor chunks into standalone output: ${serverVendorChunksTarget}`);
+}
+
+if (existsSync(publicSource)) {
+  mkdirSync(path.dirname(publicTarget), { recursive: true });
+  cpSync(publicSource, publicTarget, { recursive: true });
+  console.log(`Copied public assets into standalone output: ${publicTarget}`);
+}
+
+if (existsSync(staticSource)) {
+  mkdirSync(path.dirname(staticTarget), { recursive: true });
+  cpSync(staticSource, staticTarget, { recursive: true });
+  console.log(`Copied static assets into standalone output: ${staticTarget}`);
 }

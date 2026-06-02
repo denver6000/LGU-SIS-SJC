@@ -1,5 +1,5 @@
 import { deletePayoutRecord } from "../../../lib/server/repositories/payout-records";
-import { requireSessionUserForApi } from "../../../lib/server/auth";
+import { requireAdminForApi } from "../../../lib/server/auth";
 import { assertString, jsonError } from "../../../lib/shared/http";
 
 export async function DELETE(
@@ -7,7 +7,7 @@ export async function DELETE(
   context: { params: Promise<{ recordId: string }> }
 ) {
   try {
-    await requireSessionUserForApi();
+    await requireAdminForApi();
     const { recordId } = await context.params;
     const result = await deletePayoutRecord(assertString(recordId, "Record ID"));
     return Response.json(result);

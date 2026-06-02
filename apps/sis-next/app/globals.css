@@ -611,6 +611,97 @@ table {
   margin-bottom: 18px;
 }
 
+.requirements-timeline-shell {
+  display: grid;
+  gap: 18px;
+}
+
+.school-year-timeline {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  overflow-x: auto;
+  padding: 10px 2px 14px;
+  scrollbar-width: thin;
+}
+
+.school-year-step {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+}
+
+.school-year-step button {
+  min-width: 132px;
+  min-height: 46px;
+  padding: 0 16px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: #ffffff;
+  color: var(--text-soft);
+  font-weight: 800;
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.05);
+}
+
+.school-year-step button.active {
+  border-color: #b8d0ff;
+  background: var(--blue-soft);
+  color: var(--blue);
+}
+
+.school-year-step > span {
+  width: clamp(64px, 10vw, 132px);
+  height: 2px;
+  display: inline-block;
+  background: linear-gradient(90deg, var(--line-strong), #a9b9cf);
+}
+
+.semester-spinner {
+  width: fit-content;
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface-alt);
+}
+
+.semester-spinner label {
+  color: var(--text-faint);
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.semester-spinner select {
+  width: auto;
+  min-width: 150px;
+  min-height: 40px;
+  border-radius: 10px;
+  background: #ffffff;
+  color: var(--text);
+  font-weight: 800;
+}
+
+.requirements-filter-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(140px, 1fr)) auto;
+  align-items: end;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.payroll-filter-grid {
+  grid-template-columns: minmax(180px, 1.2fr) minmax(180px, 1.2fr) minmax(150px, 0.9fr) minmax(140px, 0.8fr) auto;
+}
+
+.requirements-filter-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
 .field {
   display: grid;
   gap: 8px;
@@ -797,6 +888,10 @@ table {
   box-shadow: 0 24px 80px rgba(15, 23, 42, 0.22);
 }
 
+.confirmation-dialog {
+  width: min(520px, 100%);
+}
+
 .action-dialog-header {
   display: flex;
   align-items: flex-start;
@@ -839,7 +934,7 @@ table {
 
 .action-dialog-summary {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 1px;
   background: var(--line);
   border-bottom: 1px solid var(--line);
@@ -871,6 +966,72 @@ table {
   border-bottom: 1px solid var(--line);
 }
 
+.student-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.summary-item {
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-alt);
+}
+
+.summary-item span {
+  color: var(--text-faint);
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.summary-item strong {
+  color: var(--text);
+  font-size: 0.95rem;
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+.summary-token-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.summary-token {
+  min-height: 32px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface-alt);
+  color: var(--text);
+  text-transform: capitalize;
+}
+
+.summary-token-muted {
+  background: #f8fafc;
+  color: var(--text-soft);
+  opacity: 0.8;
+}
+
+.inline-warning {
+  margin-bottom: 12px;
+  padding: 12px 14px;
+  border: 1px solid #f4d38b;
+  border-radius: 8px;
+  background: var(--amber-soft);
+  color: #8a4a00;
+  font-size: 0.9rem;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
 .dialog-history-header {
   display: flex;
   align-items: center;
@@ -895,6 +1056,18 @@ table {
   background: var(--surface-alt);
   color: var(--text);
   font-size: 0.86rem;
+}
+
+.dialog-history-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.secondary-button.compact {
+  min-height: 32px;
+  padding: 0 10px;
+  font-size: 0.82rem;
 }
 
 .history-list {
@@ -1160,8 +1333,13 @@ table {
 
 @media (max-width: 1180px) {
   .stat-grid,
-  .split-panels {
+  .split-panels,
+  .requirements-filter-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .requirements-filter-actions {
+    justify-content: flex-start;
   }
 }
 
@@ -1209,6 +1387,8 @@ table {
   .form-grid,
   .document-grid,
   .split-panels,
+  .requirements-filter-grid,
+  .student-summary-grid,
   .action-dialog-summary,
   .history-row,
   .filter-strip,

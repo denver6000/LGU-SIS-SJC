@@ -9,12 +9,28 @@ import { firebaseAuth } from "../lib/firebase-client";
 import { useAuth } from "../auth-provider";
 
 const SIGNED_OUT_MESSAGE_KEY = "sis-next:signed-out-message";
+const LOGIN_DRAFT_STORAGE_KEY = "sis-next:login-draft";
+
+function loginErrorMessage(error: unknown) {
+  if (
+    error &&
+    typeof error === "object" &&
+    "code" in error &&
+    (error as { code?: string }).code === "auth/network-request-failed"
+  ) {
+    return "Firebase Auth could not be reached. Check the internet connection, Firebase emulator, or project network access, then try again.";
+  }
+
+  return error instanceof Error ? error.message : "Sign in failed.";
+}
 
 export default function LoginPage() {
   const { refreshSession, user } = useAuth();
   const router = useRouter();
   const [message, setMessage] = useState(user ? "You are already signed in." : "Enter your Firebase account.");
   const [isBusy, setIsBusy] = useState(false);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
 
   useEffect(() => {
     const signedOutMessage = window.sessionStorage.getItem(SIGNED_OUT_MESSAGE_KEY);
@@ -24,14 +40,34 @@ export default function LoginPage() {
     window.sessionStorage.removeItem(SIGNED_OUT_MESSAGE_KEY);
   }, []);
 
+  useEffect(() => {
+    const savedDraft = window.localStorage.getItem(LOGIN_DRAFT_STORAGE_KEY);
+    if (!savedDraft) return;
+
+    try {
+      const draft = JSON.parse(savedDraft) as { email?: string; password?: string };
+      if (typeof draft.email === "string") setEmail(draft.email);
+      if (typeof draft.password === "string") setPassword(draft.password);
+    } catch {
+      window.localStorage.removeItem(LOGIN_DRAFT_STORAGE_KEY);
+    }
+  }, []);
+
+  useEffect(() => {
+    window.localStorage.setItem(
+      LOGIN_DRAFT_STORAGE_KEY,
+      JSON.stringify({
+        email,
+        password
+      })
+    );
+  }, [email, password]);
+
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const formElement = event.currentTarget;
-    const form = new FormData(formElement);
-    const email = String(form.get("email") || "").trim();
-    const password = String(form.get("password") || "");
+    const normalizedEmail = email.trim();
 
-    if (!email || !password) {
+    if (!normalizedEmail || !password) {
       setMessage("Enter your email and password.");
       return;
     }
@@ -40,7 +76,7 @@ export default function LoginPage() {
     setMessage("Checking account...");
 
     try {
-      const credentials = await signInWithEmailAndPassword(firebaseAuth, email, password);
+      const credentials = await signInWithEmailAndPassword(firebaseAuth, normalizedEmail, password);
       const idToken = await credentials.user.getIdToken(true);
       const response = await fetch("/api/auth/session", {
         method: "POST",
@@ -57,11 +93,13 @@ export default function LoginPage() {
 
       await refreshSession();
       setMessage("Signed in. Opening the application...");
-      formElement.reset();
+      setEmail("");
+      setPassword("");
+      window.localStorage.removeItem(LOGIN_DRAFT_STORAGE_KEY);
       router.push("/");
       router.refresh();
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Sign in failed.");
+      setMessage(loginErrorMessage(error));
     } finally {
       setIsBusy(false);
     }
@@ -90,14 +128,32 @@ export default function LoginPage() {
             <label htmlFor="loginEmail">Email address</label>
             <div className="login-input">
               <Mail size={20} aria-hidden="true" />
-              <input id="loginEmail" name="email" type="email" autoComplete="email" placeholder="Enter email" required />
+              <input
+                id="loginEmail"
+                name="email"
+                type="email"
+                autoComplete="email"
+                placeholder="Enter email"
+                value={email}
+                onChange={(event) => setEmail(event.currentTarget.value)}
+                required
+              />
             </div>
           </div>
           <div className="field-group">
             <label htmlFor="loginPassword">Password</label>
             <div className="login-input">
               <LockKeyhole size={20} aria-hidden="true" />
-              <input id="loginPassword" name="password" type="password" autoComplete="current-password" placeholder="Password" required />
+              <input
+                id="loginPassword"
+                name="password"
+                type="password"
+                autoComplete="current-password"
+                placeholder="Password"
+                value={password}
+                onChange={(event) => setPassword(event.currentTarget.value)}
+                required
+              />
             </div>
           </div>
           <p className="login-message" aria-live="polite">{message}</p>

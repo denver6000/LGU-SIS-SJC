@@ -3,7 +3,7 @@ import {
   updateStudent
 } from "../../../lib/server/repositories/students";
 import { jsonError, assertString } from "../../../lib/shared/http";
-import { requireAdminForApi } from "../../../lib/server/auth";
+import { requireAdminForApi, requireSessionUserForApi } from "../../../lib/server/auth";
 import type { StudentInput } from "../../../lib/shared/student";
 
 export async function PATCH(
@@ -11,7 +11,7 @@ export async function PATCH(
   context: { params: Promise<{ studentId: string }> }
 ) {
   try {
-    const user = await requireAdminForApi();
+    const user = await requireSessionUserForApi();
     const { studentId } = await context.params;
     const body = (await request.json()) as { student?: StudentInput };
     const student = await updateStudent(assertString(studentId, "Student ID"), body.student || {}, user);

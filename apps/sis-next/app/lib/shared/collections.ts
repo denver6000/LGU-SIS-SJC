@@ -2,6 +2,8 @@ export const COLLECTIONS = {
   students: "students",
   trash: "trash",
   payoutRecords: "payoutRecords",
+  operationLogs: "operationLogs",
+  systemConfig: "systemConfig",
   schoolCourses: "schoolCourses",
   barangays: "barangays",
   schools: "schools",

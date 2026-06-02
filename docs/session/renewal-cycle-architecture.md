@@ -1,6 +1,7 @@
 # Renewal Cycle Architecture
 
-Last updated: 2026-06-01
+Last updated: 2026-06-02
+Implementation checkpoint: 2026-06-02
 
 This note records the recommended implementation model for scholarship renewals, school-year changes, semester limits, and payroll linkage. It exists because renewal state is not a permanent student property. Renewals are per semester and per school year, so the data model must track time-bound participation instead of relying on a single `student.renewed` boolean.
 
@@ -35,7 +36,7 @@ Instead:
 
 - `students` stores identity and relatively stable student details.
 - `cycles` stores active school-year/semester periods.
-- `cycles/{cycleKey}/studentCycles` stores per-cycle participation, including `is_active`, `year_level`, and renewal status.
+- `cycles/{cycleKey}/studentCycles` stores per-cycle participation, including `is_active`, `year_level`, payout type, requirement maps, and payroll qualification status.
 - `renewalRecords` stores renewal history and limit enforcement evidence.
 - `payrollRecords` stores generated payroll/document traces.
 - `systemConfig/currentCycle` tells the UI which cycle the office is currently operating in.
@@ -85,6 +86,63 @@ Current implementation note:
 - Entries include `from_year_level`, `to_year_level`, `changed_at`, `changed_by_uid`, `changed_by_email`, and `reason`.
 - This audit trail is surfaced in the Records student action/info dialog.
 
+Current requirements implementation:
+
+- The app is now requirements-centered, with `/requirements` as the primary workspace for semester requirement tracking.
+- Semester selection is intentionally a two-semester spinner. The UI should not expose 3rd or 4th semester choices unless the real program policy changes.
+- Initial payout requirements are a six-item map: Certificate of Residency, Pagpapatunay Form, Picture of the House, Good Moral Certificate, Original Certificate of Grades, and Proof of Enrollment.
+- Renewal requirements are a separate three-item map: Liquidation, Proof of Enrollment, and Latest Grades.
+- Payroll qualification is derived, not manually selected. The system should not expose a user-editable `renewal_status` selector.
+- Each semester record has internal `payout_type: "initial" | "renewal"`. Do not expose this as a user-facing control. Newly registered/no-initial-payroll students should default to `initial`, which protects them from being required to submit renewal requirements on their first payroll.
+- Initial payout qualification means the six initial payout requirements are complete.
+- Renewal payroll qualification means the student has an initial payroll recorded and the three semester renewal requirements are complete. These requirements prove the student is still enrolled.
+- `students/{studentId}.semester_records[]` currently stores both maps directly on the semester record:
+- Requirement maps are semester-separated. A new semester starts with empty maps; it must not automatically inherit checks from the Registry tab or another semester. Legacy records may be normalized from old global fields only as migration compatibility.
+
+```ts
+{
+  school_year: "2026-2027",
+  sem_number: 1,
+  cycle_key: "2026-2027__1",
+  payout_type: "initial", // initial | renewal
+  payroll_status: "not_qualified", // not_qualified | qualified | payrolled
+  // Legacy compatibility only. New code should derive from payroll_status and requirements.
+  renewal_status: "pending",
+  payroll_id: "",
+  payroll_record_type: "", // initial_payout_payroll | renewal_payroll
+  payrolled_at: "",
+  payrolled_by_uid: "",
+  payrolled_by_email: "",
+  initial_payout_requirements: {
+    certificate_of_residency: true,
+    pagpapatunay_form: true,
+    picture_of_the_house: false,
+    good_moral_certificate: true,
+    original_certificate_of_grades: true,
+    proof_of_enrollment: true
+  },
+  renewal_requirements: {
+    liquidation: false,
+    proof_of_enrollment: false,
+    latest_grades: false
+  },
+  // Legacy compatibility only. New code should read renewal_requirements.
+  requirements: {
+    liquidation: false,
+    proof_of_enrollment: false,
+    latest_grades: false
+  }
+}
+```
+
+- Renewal requirements must stay locked until the student has an initial payroll flag. In the bridge implementation, that means `student.payrolled === true` or at least one semester record with `payroll_status: "payrolled"`.
+- The current Payrolls tab consumes requirement-qualified students for the selected school year/semester. It should list students who are qualified and not yet payrolled for that exact cycle.
+- `/payrolls` separates those candidates into `New` for initial payout and `Renewal` for renewal payout.
+- Initial payout candidates qualify from the six initial requirements and do not need renewal requirements when they have no initial payroll yet.
+- Renewal candidates qualify from initial payroll existence plus the three renewal requirements.
+- Payroll generation should write `payroll_status: "payrolled"` for that semester, store `payroll_id`, `payroll_record_type`, `payrolled_at`, and payrolling admin fields on the student doc's semester record, and save the trace as `initial_payout_payroll` or `renewal_payroll` based on the cycle record's internal payout type.
+- `school_id` is a legacy field only. Do not add it back to the active six-item initial payout checklist unless the product owner explicitly changes the requirement list.
+
 This is a practical bridge toward the fuller cycle model. In the future, per-cycle year level should live on `cycles/{cycleKey}/studentCycles/{studentId}`, but the current student-level history remains useful as an audit trail for pre-cycle migration edits.
 
 ## Cycle Membership
@@ -98,7 +156,10 @@ cycles/2026-2027__1/studentCycles/STU001 = {
   year_level: "2",
   batch: "7",
   is_active: true,
-  renewal_status: "pending", // pending | renewed | payrolled | inactive | void
+  payout_type: "initial", // initial | renewal
+  payroll_status: "not_qualified", // not_qualified | qualified | payrolled
+  initial_payout_requirements: {},
+  renewal_requirements: {},
   renewal_id: "",
   payroll_id: "",
   created_at: "...",
@@ -112,8 +173,9 @@ Useful UI queries:
 
 - active students for current cycle: `studentCycles where is_active == true`
 - year-level scope: add `where year_level == "1"` or similar
-- renewed students: `where renewal_status == "renewed"`
-- payroll candidates: current-cycle records with `renewal_status == "renewed"` and no `payroll_id`
+- payroll-qualified students: records whose requirements derive `payroll_status == "qualified"`
+- initial payroll candidates: current-cycle records with `payout_type == "initial"`, `payroll_status == "qualified"`, and no prior initial payroll
+- already payrolled this cycle: `where payroll_status == "payrolled"`
 
 ## Renewal Records
 
@@ -140,7 +202,7 @@ renewalRecords/{renewalId} = {
 }
 ```
 
-Renewal records are the source of truth for renewal history and decision support.
+Renewal records are the long-term target for renewal history and decision support. In the current bridge implementation, semester requirement maps and derived `payroll_status` are the practical source of payroll qualification.
 
 Backend constraints once the office formalizes cycle policy:
 
@@ -152,22 +214,23 @@ The backend should not enforce a maximum number of renewals per school year or s
 Current implementation note:
 
 - `students/{studentId}` now keeps a lightweight `renewal_history` array.
-- Renewal history entries are appended when `renewed` changes between pending and renewed.
-- Entries include `status`, `changed_at`, `changed_by_uid`, `changed_by_email`, and `reason`.
-- Payroll creation that marks a student renewed also appends renewal history.
-- The Records table shows the number of renewed history entries, and the Record Actions dialog shows the full renewal timeline.
+- Renewal history remains useful for legacy/audit context.
+- New payroll qualification should not depend on `student.renewed`.
+- Payroll creation should not mark a student `renewed` as a side effect.
+- The Records table and Record Actions dialog may show legacy renewal history, but requirement/payroll qualification should come from semester records.
 - There is intentionally no two-renewal hard limit in the current implementation.
 
 ## Payroll Linkage
 
-Payroll generation should consume current-cycle renewal records or current-cycle student membership records, not `student.renewed`.
+Payroll generation should consume current-cycle requirement/qualification records, not `student.renewed`.
 
 When creating payroll:
 
 - generate the `.docx` and `.xlsx` documents
 - create `payrollRecords`
-- link each affected renewal record with `payroll_id`
-- update the current-cycle `studentCycles/{studentId}` with `renewal_status: "payrolled"` and `payroll_id`
+- link each affected semester/cycle record with `payroll_id` when that field exists
+- update the current-cycle semester/cycle record with `payroll_status: "payrolled"` and `payroll_id`
+- set `student.payrolled: true` only as the broad compatibility flag that initial payroll exists
 
 Payrolls are government document events. Do not allow Records actions or manual toggles to mutate payroll state.
 
@@ -184,12 +247,13 @@ Every page that deals with renewal or payroll should know the current cycle:
 Recommended UI labels:
 
 - `Current Cycle: 2026-2027, 1st Semester`
-- `Renewed this cycle`
-- `Payrolled this cycle`
+- `Initial payout qualified`
+- `Renewal qualified`
+- `Payrolled this semester`
 - `Renewal history`
 - `Cycle inactive`
 
-Avoid labels that imply permanent state, such as `Student is renewed`, unless scoped to a school year and semester.
+Avoid labels that imply permanent state, such as `Student is renewed`, unless scoped to a school year and semester. Prefer requirement and payroll qualification labels.
 
 ## Migration Path
 
@@ -197,8 +261,8 @@ Avoid labels that imply permanent state, such as `Student is renewed`, unless sc
 2. Add `cycles/{cycleKey}/studentCycles`.
 3. Add `renewalRecords`.
 4. Keep `student.renewed` temporarily only as compatibility display data.
-5. Make Renewal write renewal records and cycle membership updates instead of mutating only `student.renewed`.
-6. Make Payrolls consume renewal records or cycle membership records for the active cycle.
+5. Make Requirements/Renewal write cycle-scoped requirement maps and derived payroll qualification instead of mutating only `student.renewed`.
+6. Make Payrolls consume requirement-qualified cycle records for the active cycle.
 7. Backfill existing `student.renewed === true` into inferred renewal records for a chosen school year/semester.
 8. Stop showing or remove `student.renewed` once migrated.
 

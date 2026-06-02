@@ -1,6 +1,6 @@
 # Claude Handoff Directives
 
-Last updated: 2026-06-01
+Last updated: 2026-06-02
 
 This file is for Claude or any assistant continuing the SIS migration. The canonical architecture/session memory is `docs/session/agents.md`. Follow these directives to avoid undoing important decisions.
 
@@ -19,6 +19,7 @@ The visible nav rail should contain:
 - Dashboard
 - Catalogs
 - Registry
+- Requirements
 - Renewal
 - Records
 - Users
@@ -50,8 +51,14 @@ Avoid generic student status fields. The app intentionally removed:
 Use explicit workflow flags:
 
 - `claimed`
-- `renewed`
 - `payrolled`
+
+Compatibility-only fields:
+
+- `renewed`
+- `renewal_status`
+
+Do not expose user-editable `renewal_status` or `payout_type`.
 
 ## Payroll Rules
 
@@ -72,29 +79,55 @@ Record Actions should not include:
 - Mark Claimed
 - Mark Payrolled
 
+## Requirements Workspace
+
+`/requirements` is the main semester requirement management surface.
+
+Current behavior:
+
+- School-year timeline at the top.
+- Two-semester spinner only.
+- Local student filters near the list: name, student ID, school, and barangay.
+- Initial payout requirements and renewal requirements are separate maps.
+- Requirement maps are separated per semester and new semester records start empty.
+- Renewal requirements are skipped/disabled for initial payout students.
+- Renewal requirements require existing initial payroll for renewal students.
+- No user-facing Payroll Qualification Type control.
+- No user-facing Renewal Status selector.
+
 ## Payroll Workflows
 
 The Payrolls page has two tabs:
 
-- `No Payrolled Students`
-- `Renewed Students`
+- `New`
+- `Renewal`
 
-`No Payrolled Students` behavior:
+`New` behavior:
 
-- Shows students where `payrolled !== true`.
+- Shows initial payout candidates for the selected school year/semester.
+- Fresh/no-initial-payroll students qualify from the six initial payout requirements and skip renewal requirements for their first payroll.
+
+`Renewal` behavior:
+
+- Shows renewal payout candidates for the selected school year/semester.
+- Renewal students qualify from initial payroll existence plus Liquidation, Proof of Enrollment, and Latest Grades.
+
+Both tabs:
+
 - Generates payroll files.
-- Sets selected students `renewed: true`.
-- Sets selected students `payrolled: true`.
-- Creates payroll trace records with `type: "new_student_payroll"`.
-
-`Renewed Students` behavior:
-
-- Shows students where `renewed === true`.
-- Generates payroll files.
-- Sets selected students `payrolled: true`.
-- Creates payroll trace records with `type: "renewed_student_payroll"`.
+- Sets selected semester record `payroll_status: "payrolled"`.
+- Stores `payroll_id`, `payroll_record_type`, `payrolled_at`, `payrolled_by_uid`, and `payrolled_by_email` on that selected semester record in the student doc.
+- Sets student `payrolled: true` only as the broad compatibility flag that initial payroll exists.
+- Creates payroll trace records with `type: "initial_payout_payroll"` or `type: "renewal_payroll"` based on the internal selected-cycle payout type.
+- Does not set `renewed` as a side effect.
 
 Payroll trace records live in `payoutRecords` for compatibility.
+
+Payroll qualification rules:
+
+- Initial payout qualification comes from the six initial payout requirements.
+- Renewal payout qualification comes from initial payroll existence plus Liquidation, Proof of Enrollment, and Latest Grades.
+- `payout_type` is internal only. New/no-initial-payroll students default to `initial`.
 
 Useful payroll record fields:
 

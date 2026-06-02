@@ -25,8 +25,6 @@ export type PayrollExportMetadata = {
   sem_number: string;
 };
 
-const PAYROLL_WORD_TEMPLATE_URL = "/templates/PAYROLL_WORD_TEMPLATE.docx";
-const PAYROLL_EXCEL_TEMPLATE_URL = "/templates/PAYROLL_TEMPLATE.xlsx";
 const DOCX_MIME_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 const XLSX_MIME_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 const ZIP_MIME_TYPE = "application/zip";
@@ -36,6 +34,10 @@ const PAYROLL_END_MARKER = "X-X-X-X";
 const PAYROLL_EXCEL_START_ROW = 10;
 const PAYROLL_EXCEL_END_ROW = 24;
 const PAYROLL_DEFAULT_AMOUNT = 5000;
+
+function payrollTemplateUrl(template: "word" | "excel") {
+  return new URL(`./api/payroll-templates/${template}`, window.location.href).toString();
+}
 
 function downloadBlob(filename: string, blob: Blob) {
   const url = URL.createObjectURL(blob);
@@ -188,7 +190,10 @@ function fillPayrollExcelSheetXml(sheetXml: string, students: PayrollStudent[], 
 }
 
 async function buildPayrollWordBlob(students: PayrollStudent[], metadata: PayrollExportMetadata) {
-  const response = await fetch(PAYROLL_WORD_TEMPLATE_URL);
+  const response = await fetch(payrollTemplateUrl("word"), {
+    credentials: "same-origin",
+    cache: "no-store"
+  });
   if (!response.ok) {
     throw new Error(`Unable to load Word template: ${response.status} ${response.statusText}`);
   }
@@ -208,7 +213,10 @@ async function buildPayrollWordBlob(students: PayrollStudent[], metadata: Payrol
 }
 
 async function buildPayrollExcelBlob(students: PayrollStudent[], sheetNumber: number, totalSheets: number) {
-  const response = await fetch(PAYROLL_EXCEL_TEMPLATE_URL);
+  const response = await fetch(payrollTemplateUrl("excel"), {
+    credentials: "same-origin",
+    cache: "no-store"
+  });
   if (!response.ok) {
     throw new Error(`Unable to load Excel template: ${response.status} ${response.statusText}`);
   }

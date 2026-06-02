@@ -7,7 +7,9 @@ export {
   deleteManagedUser,
   deleteSchoolCourse,
   deleteTrashStudent,
+  getCurrentCycleConfig,
   getPayoutRecords,
+  getOperationLogs,
   getOptions,
   getSchoolCourses,
   getStudents,
@@ -17,6 +19,8 @@ export {
   moveStudentToTrash,
   restoreStudent,
   savePayoutRecord,
+  saveOperationLog,
+  saveCurrentCycleConfig,
   saveOption,
   saveSchoolCourse,
   seedFirestoreFromBundledJson,
@@ -25,17 +29,22 @@ export {
 } from "./client/api-client";
 
 export type { AppInitialData } from "./client/api-client";
+export type { OperationLog } from "./shared/operation-log";
 export type { PayoutRecord } from "./shared/payout-record";
 export type { Student } from "./shared/student";
 
 import {
   createStudent,
   deleteOption,
+  getCurrentCycleConfig,
   getOptions,
   getPayoutRecords,
+  getOperationLogs,
   getStudents,
+  saveCurrentCycleConfig,
   saveOption,
   savePayoutRecord,
+  saveOperationLog,
   seedFirestoreFromBundledJson
 } from "./client/api-client";
 
