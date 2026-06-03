@@ -13,7 +13,7 @@ const ID_TOKEN_EXPIRES_IN = 1000 * 60 * 55;
 export async function GET() {
   const user = await getSessionUser();
   if (!user) {
-    return NextResponse.json({ user: null }, { status: 401 });
+    return NextResponse.json({ user: null });
   }
 
   return NextResponse.json({ user });

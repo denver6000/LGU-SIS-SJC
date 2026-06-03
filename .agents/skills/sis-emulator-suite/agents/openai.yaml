@@ -1,0 +1,4 @@
+interface:
+  display_name: "SIS Emulator Suite"
+  short_description: "Inspect the SIS Firebase emulator suite with reusable commands."
+  default_prompt: "Use $sis-emulator-suite to inspect local Firebase Auth, Firestore collections, students, requirements, and operation logs before creating custom scripts."

@@ -8,7 +8,14 @@
     "postbuild": "node scripts/ensure-standalone-next.mjs",
     "start": "node server.mjs",
     "start:prod-local": "node scripts/start-prod-local.mjs",
-    "prod:local": "npm run build && npm run start:prod-local"
+    "prod:local": "npm run build && npm run start:prod-local",
+    "emu:status": "node scripts/emulator-suite.mjs status",
+    "emu:collections": "node scripts/emulator-suite.mjs collections",
+    "emu:students": "node scripts/emulator-suite.mjs students",
+    "emu:student": "node scripts/emulator-suite.mjs student",
+    "emu:requirements": "node scripts/emulator-suite.mjs requirements",
+    "emu:auth-users": "node scripts/emulator-suite.mjs auth-users",
+    "emu:logs": "node scripts/emulator-suite.mjs logs"
   },
   "dependencies": {
     "@tanstack/react-virtual": "^3.13.24",

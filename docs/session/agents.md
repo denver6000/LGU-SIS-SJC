@@ -37,6 +37,13 @@ Implemented and verified:
 - Mutating UI actions now use confirmation dialogs, a shared loading overlay, and `operationLogs` audit records for inserts, updates, deletes, restores, and payroll exports.
 - Encoder permissions were expanded to include `/requirements` and `/register`, while `/payrolls`, payout records, payroll history, payroll filters, payroll operation logs, `/users`, `/catalogs`, and `/trash` remain admin-only.
 - Encoder requirement edits preserve existing payroll metadata and cannot set top-level or semester-level payroll state.
+- Student lifecycle philosophy was clarified: semester payroll status is cycle-specific history, but a student who has ever been payrolled is permanently treated as a renewal student by the system.
+- Initial payout requirements are global student-level requirements from `students/{studentId}.requirements`; they supersede school-year/semester selection and must not reset per year.
+- Register Student, Requirements, Payrolls, and the student model now read initial requirements from the same global map. Legacy semester `initial_payout_requirements` snapshots are used only as a migration fallback when the global map is empty.
+- Saving Requirements writes the initial map back to `students/{studentId}.requirements` and syncs old semester snapshots, so records created during earlier per-semester iterations self-heal when touched.
+- Renewal requirements remain semester-specific and are stored on the selected `semester_records[]` entry.
+- `apps/sis-next/app/lib/models/student.ts` now documents the student doc shape through `StudentDocShape` and exposes `StudentModel` helpers for permanent payroll lifecycle and timeline debug snapshots.
+- Requirements and Payrolls timeline views now log collapsed console tables showing each visible student's top-level `payrolled`, legacy `renewed`, permanent lifecycle, and selected-cycle payroll status.
 - Firebase Auth `auth/network-request-failed` is caught in the auth provider and shown as friendly login copy.
 - Session architecture docs were updated to preserve the corrected model.
 
@@ -58,7 +65,6 @@ The application uses a sidebar/nav rail with explicit App Router pages:
 - `/catalogs`
 - `/register`
 - `/requirements`
-- `/renewal`
 - `/records`
 - `/users`
 - `/payrolls`
@@ -68,7 +74,8 @@ Legacy or removed routes:
 
 - `/exports` redirects to `/payrolls`.
 - `/setup` redirects to `/catalogs`.
-- `Import`, `Payouts`, and `Setup` are removed from visible navigation.
+- `/renewal` redirects to `/requirements`.
+- `Import`, `Payouts`, `Setup`, and the standalone `Renewal` tab are removed from visible navigation.
 
 ## Authentication And Roles
 
@@ -96,7 +103,7 @@ Important role decision:
 - New non-admin users must use custom claims `{ role: "encoder", encoder: true }`.
 - Do not create new `{ role: "user", user: true }` accounts.
 - Keep backward compatibility until all old users are migrated.
-- Encoders can work in Registry, Requirements, Records, Renewal, and Dashboard unless a later role split changes the visible navigation.
+- Encoders can work in Registry, Requirements, Records, and Dashboard unless a later role split changes the visible navigation.
 - Encoders can create student records and manage semester requirement maps.
 - Encoders cannot access Payrolls, payout record APIs, payroll history lookup, payroll operation logs, user management, catalogs, or trash.
 - Server-side student writes sanitize encoder input so payroll fields and payroll metadata cannot be changed outside admin workflows.
@@ -122,6 +129,20 @@ Operational note:
 
 - Stop emulators cleanly with `Ctrl+C` so Auth users and Firestore data are exported.
 - Do not hard-kill the emulator process if preserving local state matters.
+
+Reusable emulator toolbox. A project-local skill for this workflow lives at `.agents/skills/sis-emulator-suite`; invoke/use `$sis-emulator-suite` for emulator data debugging.
+
+```bash
+npm run emu:status
+npm run emu:collections
+npm run emu:students -- --limit 20 --filter "juan"
+npm run emu:student -- STU001
+npm run emu:requirements -- --limit 20 --filter "juan"
+npm run emu:auth-users
+npm run emu:logs -- --limit 20
+```
+
+The toolbox lives at `apps/sis-next/scripts/emulator-suite.mjs`. Prefer these commands before creating one-off inspection scripts.
 
 Known local admin emulator user:
 
@@ -248,10 +269,11 @@ Do not reintroduce broad fake status fields unless the user explicitly changes t
 
 Current requirement-centered bridge model:
 
-- `students/{studentId}.requirements` stores the Registry-level initial requirement map for registration review and compatibility.
+- `students/{studentId}.requirements` stores the global six-item initial payout requirement map. This is the live source of truth for initial requirements across all school years and semesters.
 - `students/{studentId}.semester_records[]` is the active per-semester requirements bridge.
-- Each semester record stores `school_year`, `sem_number`, `cycle_key`, internal `payout_type`, derived `payroll_status`, `initial_payout_requirements`, `renewal_requirements`, payroll metadata, timestamps, updater fields, and notes.
-- Requirement maps are semester-separated. A new semester starts with empty maps and must not automatically inherit another semester or the Registry checklist.
+- Each semester record stores `school_year`, `sem_number`, `cycle_key`, internal `payout_type`, derived `payroll_status`, `renewal_requirements`, payroll metadata, timestamps, updater fields, and notes. `initial_payout_requirements` may remain only as a compatibility/snapshot field.
+- Renewal requirement maps are semester-separated. A new semester starts with empty renewal requirements and must not automatically inherit another semester.
+- Initial requirements do not belong to a semester; they are read from the student record and apply globally.
 - `payout_type` is internal only. Do not expose a UI control for it.
 - New/no-initial-payroll students default internally to `payout_type: "initial"` so renewal requirements are skipped for first payroll.
 - Once initial payroll exists, renewal qualification requires the three renewal requirements.

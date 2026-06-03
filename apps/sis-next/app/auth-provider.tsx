@@ -70,21 +70,32 @@ export function AuthProvider({
 
   useEffect(() => {
     return onIdTokenChanged(firebaseAuth, async (nextUser) => {
-      if (!nextUser) return;
+      if (!nextUser) {
+        setUser(null);
+        setIsLoading(false);
+        return;
+      }
 
       try {
         const idToken = await nextUser.getIdToken();
-        await fetch("/api/auth/session", {
+        const response = await fetch("/api/auth/session", {
           method: "POST",
           headers: {
             "Content-Type": "application/json"
           },
           body: JSON.stringify({ idToken })
-        }).catch(() => undefined);
+        });
+
+        if (response.ok) {
+          const data = (await response.json()) as { user: SessionUser | null };
+          setUser(data.user);
+        }
       } catch (error) {
         if (!isFirebaseNetworkError(error)) {
           console.error("Unable to refresh Firebase session token.", error);
         }
+      } finally {
+        setIsLoading(false);
       }
     });
   }, []);

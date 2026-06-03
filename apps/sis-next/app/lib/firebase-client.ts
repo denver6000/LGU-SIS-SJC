@@ -31,25 +31,31 @@ export const firebaseApp = getApps().length ? getApp() : initializeApp(firebaseC
 export const firebaseAuth = getAuth(firebaseApp);
 export const firebaseDb = getFirestore(firebaseApp);
 
-let authEmulatorConnected = false;
-let firestoreEmulatorConnected = false;
+const emulatorState = globalThis as typeof globalThis & {
+  __sisFirebaseEmulators?: {
+    auth?: boolean;
+    firestore?: boolean;
+  };
+};
+
+emulatorState.__sisFirebaseEmulators ??= {};
 
 if (isDevAppEnv()) {
-  if (!authEmulatorConnected) {
+  if (!emulatorState.__sisFirebaseEmulators.auth) {
     connectAuthEmulator(
       firebaseAuth,
       `http://${FIREBASE_EMULATOR_HOST}:${FIREBASE_AUTH_EMULATOR_PORT}`,
       { disableWarnings: true }
     );
-    authEmulatorConnected = true;
+    emulatorState.__sisFirebaseEmulators.auth = true;
   }
 
-  if (!firestoreEmulatorConnected) {
+  if (!emulatorState.__sisFirebaseEmulators.firestore) {
     connectFirestoreEmulator(
       firebaseDb,
       FIREBASE_EMULATOR_HOST,
       FIRESTORE_EMULATOR_PORT
     );
-    firestoreEmulatorConnected = true;
+    emulatorState.__sisFirebaseEmulators.firestore = true;
   }
 }

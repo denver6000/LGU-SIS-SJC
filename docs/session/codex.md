@@ -34,7 +34,6 @@ Visible pages:
 - Catalogs
 - Registry
 - Requirements
-- Renewal
 - Records
 - Users
 - Payrolls
@@ -42,7 +41,7 @@ Visible pages:
 
 Role visibility:
 
-- Encoders can access Dashboard, Registry, Requirements, Renewal, and Records.
+- Encoders can access Dashboard, Registry, Requirements, and Records.
 - Encoders can create student records and manage semester requirement maps.
 - Encoders should not see Payrolls, payout records, payroll history, payroll operation logs, Users, Catalogs, or Trash.
 - Admins keep full navigation and payroll-aware requirement controls.
@@ -52,11 +51,13 @@ Removed from visible navigation:
 - Import
 - Payout Records
 - Setup
+- Renewal
 
 Redirects:
 
 - `/exports` redirects to `/payrolls`.
 - `/setup` redirects to `/catalogs`.
+- `/renewal` redirects to `/requirements`.
 
 ## Payroll Is Strict
 
@@ -86,10 +87,17 @@ Payroll traces currently use `payoutRecords` for compatibility.
 
 Payroll qualification rules:
 
-- Initial payout qualification comes from the six initial payout requirements.
+- Initial payout qualification comes from the six global student-level initial payout requirements.
 - Renewal payout qualification comes from initial payroll existence plus Liquidation, Proof of Enrollment, and Latest Grades.
 - `renewal_status` and `payout_type` are not user-facing controls.
 - New/no-initial-payroll students default internally to initial payout, which skips renewal requirements for first payroll.
+- Once a student has ever been payrolled, they are permanently a renewal student in system lifecycle terms.
+- A selected semester can still have its own `payroll_status` and payroll trace, but that cycle-local status must not reset the student's permanent renewal lifecycle.
+- Initial requirements supersede school-year/semester selection and are read from `students/{studentId}.requirements`.
+- For compatibility, old `semester_records[].initial_payout_requirements` snapshots may be read only when the global initial requirement map is empty.
+- Saving from Requirements rewrites the chosen initial requirement map to `students/{studentId}.requirements` and syncs semester snapshots so old per-semester initial data does not keep drifting.
+- Renewal requirements are the only requirement map that resets per semester.
+- The student doc shape and lifecycle helpers live in `apps/sis-next/app/lib/models/student.ts`.
 
 ## Requirements Workspace
 
@@ -101,11 +109,12 @@ Current behavior:
 - It generates up to 10 school years.
 - Semester selector is a two-semester spinner only.
 - Student filters are local to Requirements and sit near the student list: name, student ID, school, and barangay.
-- Each semester has separate requirement maps. New semesters start empty and must not inherit Registry or another semester's checks.
-- Initial payout requirements and renewal requirements are edited separately.
+- Each semester has separate renewal requirement maps. New semesters start with empty renewal checks.
+- Initial payout requirements and renewal requirements are edited separately, but initial requirements save globally to the student record.
 - Renewal requirements are skipped/disabled for initial-payout students and require initial payroll for renewal students.
 - Encoders see one requirements-focused student list without payrolled/non-payrolled tabs, payroll qualification columns, or payroll wording in the requirement editor.
 - Admins still see payroll-aware buckets and qualification indicators.
+- Requirements logs a collapsed console table when the selected timeline/cycle list changes, including top-level `payrolled`, legacy `renewed`, permanent lifecycle, and selected-cycle payroll status.
 
 ## Records Page
 
@@ -120,6 +129,8 @@ Record Actions dialog should remain uncluttered:
 Payroll History Lookup is in `/records` and reads from payroll trace records.
 
 Payroll count, totals, payroll filters, and Payroll History Lookup are admin-only. Encoders should see the student lookup/requirements view only.
+
+Payrolls logs a collapsed console table when the selected timeline/cycle list changes, using the same lifecycle fields as Requirements.
 
 ## Auth And Roles
 
@@ -156,6 +167,24 @@ Expected emulator ports:
 
 - Firestore: `127.0.0.1:8080`
 - Auth: `127.0.0.1:9099`
+
+Use the checked-in emulator toolbox before writing one-off inspection scripts. A project-local skill for this workflow lives at `.agents/skills/sis-emulator-suite`; invoke/use `$sis-emulator-suite` for emulator data debugging.
+
+```bash
+npm run emu:status
+npm run emu:collections
+npm run emu:students -- --limit 20 --filter "juan"
+npm run emu:student -- STU001
+npm run emu:requirements -- --limit 20 --filter "juan"
+npm run emu:auth-users
+npm run emu:logs -- --limit 20
+```
+
+Toolbox file:
+
+```text
+apps/sis-next/scripts/emulator-suite.mjs
+```
 
 ## Firestore SSR Caution
 

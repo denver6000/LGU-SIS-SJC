@@ -7,7 +7,14 @@
     "serve": "serve public --listen 4173 --single",
     "dev": "npm run serve",
     "emulators": "npm --prefix functions run build && firebase emulators:start --project lgus-sjc-scholarship --import=./emulator-data/local-suite --export-on-exit=./emulator-data/local-suite",
-    "emulators:ui": "firebase emulators:start --only ui --project lgus-sjc-scholarship"
+    "emulators:ui": "firebase emulators:start --only ui --project lgus-sjc-scholarship",
+    "emu:status": "node apps/sis-next/scripts/emulator-suite.mjs status",
+    "emu:collections": "node apps/sis-next/scripts/emulator-suite.mjs collections",
+    "emu:students": "node apps/sis-next/scripts/emulator-suite.mjs students",
+    "emu:student": "node apps/sis-next/scripts/emulator-suite.mjs student",
+    "emu:requirements": "node apps/sis-next/scripts/emulator-suite.mjs requirements",
+    "emu:auth-users": "node apps/sis-next/scripts/emulator-suite.mjs auth-users",
+    "emu:logs": "node apps/sis-next/scripts/emulator-suite.mjs logs"
   },
   "devDependencies": {
     "firebase-tools": "^14.10.0",

@@ -52,6 +52,29 @@ function normalizeRequirementMap(
   return requirementMap;
 }
 
+function mergeRequirementMaps(...maps: Array<Partial<StudentRequirementMap> | undefined>) {
+  const requirements = emptyRequirementMap();
+
+  for (const map of maps) {
+    for (const key of REQUIREMENT_KEYS) {
+      requirements[key] = requirements[key] || map?.[key] === true;
+    }
+  }
+
+  return requirements;
+}
+
+function normalizeSemesterInitialRequirementSnapshots(value: unknown) {
+  if (!Array.isArray(value)) return emptyRequirementMap();
+
+  return mergeRequirementMaps(
+    ...value.map((entry) => {
+      if (!entry || typeof entry !== "object") return emptyRequirementMap();
+      return normalizeRequirementMap((entry as Partial<StudentSemesterRecord>).initial_payout_requirements);
+    })
+  );
+}
+
 function emptyRenewalRequirementMap(): StudentRenewalRequirementMap {
   return {
     liquidation: false,
@@ -79,6 +102,10 @@ function normalizeRenewalRequirementMap(
 
 function requirementMapComplete(requirements: StudentRequirementMap) {
   return REQUIREMENT_KEYS.every((key) => requirements[key]);
+}
+
+function requirementMapHasAny(requirements: StudentRequirementMap) {
+  return REQUIREMENT_KEYS.some((key) => requirements[key]);
 }
 
 function renewalRequirementMapComplete(requirements: StudentRenewalRequirementMap) {
@@ -306,7 +333,7 @@ export function normalizeStudentRecord(
   const renewalHistory = normalizeRenewalHistory(renewalHistorySource);
   const renewed = normalizeBoolean(overrides.renewed ?? input.renewed);
   const renewedAt = String(overrides.renewed_at ?? input.renewed_at ?? "").trim();
-  const requirements = normalizeRequirementMap(overrides.requirements ?? input.requirements, {
+  const explicitRequirements = normalizeRequirementMap(overrides.requirements ?? input.requirements, {
     certificate_of_residency: overrides.certificate_of_residency ?? input.certificate_of_residency,
     pagpapatunay_form: overrides.pagpapatunay_form ?? input.pagpapatunay_form,
     picture_of_the_house: overrides.picture_of_the_house ?? input.picture_of_the_house,
@@ -314,6 +341,9 @@ export function normalizeStudentRecord(
     original_certificate_of_grades: overrides.original_certificate_of_grades ?? input.original_certificate_of_grades,
     proof_of_enrollment: overrides.proof_of_enrollment ?? input.proof_of_enrollment
   });
+  const requirements = requirementMapHasAny(explicitRequirements)
+    ? explicitRequirements
+    : normalizeSemesterInitialRequirementSnapshots(overrides.semester_records ?? input.semester_records);
 
   return {
     student_id: String(overrides.student_id ?? input.student_id ?? "").trim(),

@@ -1,7 +1,5 @@
-import { renderAppView } from "../view-page";
+import { redirect } from "next/navigation";
 
-export const dynamic = "force-dynamic";
-
-export default async function RenewalPage() {
-  return renderAppView("renewal");
+export default function RenewalPage() {
+  redirect("/requirements");
 }

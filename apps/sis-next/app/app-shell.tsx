@@ -7,7 +7,6 @@ import {
   LayoutDashboard,
   LogOut,
   Menu,
-  Repeat2,
   RotateCcw,
   ShieldUser,
   SlidersHorizontal,
@@ -19,6 +18,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "./auth-provider";
 import { exportPayrollFiles } from "./lib/payroll-export";
+import { buildStudentTimelineDebugRows, hasPermanentPayroll, lifecyclePayoutType } from "./lib/models/student";
 import { APP_VIEWS, isAdminOnlyView, labelForView, routeForView, type AppViewName } from "./lib/shared/views";
 import {
   createManagedUser,
@@ -172,7 +172,6 @@ const navIcons: Record<AppViewName, React.ComponentType<{ size?: number }>> = {
   catalogs: SlidersHorizontal,
   register: UserRoundPlus,
   requirements: ListChecks,
-  renewal: Repeat2,
   records: ClipboardList,
   users: ShieldUser,
   payrolls: FileDown,
@@ -229,6 +228,29 @@ function requirementMapFromLegacySource(value: unknown): StudentRequirementMap {
   }
 
   return requirements;
+}
+
+function mergeRequirementMaps(...maps: Array<Partial<StudentRequirementMap> | undefined>) {
+  const requirements = emptyRequirementMap();
+
+  for (const map of maps) {
+    for (const field of requirementFields) {
+      requirements[field] = requirements[field] || map?.[field] === true;
+    }
+  }
+
+  return requirements;
+}
+
+function initialRequirementsFromSemesterSnapshots(records: unknown) {
+  if (!Array.isArray(records)) return emptyRequirementMap();
+
+  return mergeRequirementMaps(
+    ...records.map((record) => {
+      if (!record || typeof record !== "object") return emptyRequirementMap();
+      return requirementMapFromLegacySource((record as Partial<StudentSemesterRecord>).initial_payout_requirements);
+    })
+  );
 }
 
 function renewalRequirementMapFromAny(value: unknown): StudentRenewalRequirementMap {
@@ -378,16 +400,16 @@ function invalidManagedUserFields(draft: ManagedUserDraft, isEditing: boolean) {
   return fields;
 }
 
-function getStudentRequirements(student: Pick<Student, "requirements"> & Partial<Record<StudentRequirementKey, boolean>>) {
-  const requirements = student.requirements ? requirementMapFromLegacySource(student.requirements) : emptyRequirementMap();
-
-  for (const field of requirementFields) {
-    if (student[field] === true) {
-      requirements[field] = true;
-    }
-  }
-
-  return requirements;
+function getStudentRequirements(
+  student: Pick<Student, "requirements"> & Partial<Pick<Student, "semester_records">> & Partial<Record<StudentRequirementKey, boolean>>
+) {
+  const globalRequirements = mergeRequirementMaps(
+    requirementMapFromLegacySource(student.requirements),
+    Object.fromEntries(requirementFields.map((field) => [field, student[field] === true])) as StudentRequirementMap
+  );
+  return hasAnyInitialRequirement(globalRequirements)
+    ? globalRequirements
+    : initialRequirementsFromSemesterSnapshots(student.semester_records);
 }
 
 function getSemesterRecords(student: Student) {
@@ -398,10 +420,8 @@ function getSemesterRecordForCycle(student: Student, currentCycle: CurrentCycleC
   return getSemesterRecords(student).find((record) => record.cycle_key === currentCycle.cycle_key) || null;
 }
 
-function getSemesterInitialPayoutRequirements(record: StudentSemesterRecord | null) {
-  return record?.initial_payout_requirements
-    ? requirementMapFromLegacySource(record.initial_payout_requirements)
-    : emptyRequirementMap();
+function getInitialPayoutRequirements(student: Student) {
+  return getStudentRequirements(student);
 }
 
 function getSemesterRenewalRequirements(record: StudentSemesterRecord | null) {
@@ -409,18 +429,14 @@ function getSemesterRenewalRequirements(record: StudentSemesterRecord | null) {
 }
 
 function hasInitialPayroll(student: Student) {
-  return Boolean(
-    student.payrolled ||
-      getSemesterRecords(student).some(
-        (record) => record.payroll_status === "payrolled" || record.renewal_status === "payrolled"
-      )
-  );
+  return hasPermanentPayroll(student);
 }
 
 function getSemesterPayoutType(student: Student, record: StudentSemesterRecord | null): StudentSemesterRecord["payout_type"] {
-  if (!hasInitialPayroll(student)) return "initial";
+  const lifecycle = lifecyclePayoutType(student);
+  if (lifecycle === "renewal") return "renewal";
   if (record?.payout_type === "initial" || record?.payout_type === "renewal") return record.payout_type;
-  return "renewal";
+  return "initial";
 }
 
 function getSemesterPayrollStatus(student: Student, cycle: CurrentCycleConfig): StudentSemesterRecord["payroll_status"] {
@@ -429,8 +445,8 @@ function getSemesterPayrollStatus(student: Student, cycle: CurrentCycleConfig): 
   return isQualifiedForPayroll(student, cycle) ? "qualified" : "not_qualified";
 }
 
-function isInitialPayoutQualified(student: Student, record: StudentSemesterRecord | null) {
-  return requirementCompletionCount(getSemesterInitialPayoutRequirements(record)) === requirementFields.length;
+function isInitialPayoutQualified(student: Student) {
+  return requirementCompletionCount(getInitialPayoutRequirements(student)) === requirementFields.length;
 }
 
 function isRenewalPayoutQualified(record: StudentSemesterRecord | null) {
@@ -442,7 +458,7 @@ function isQualifiedForPayroll(student: Student, cycle: CurrentCycleConfig) {
   if (getSemesterPayrollStatusFromRecord(record) === "payrolled") return false;
   return getSemesterPayoutType(student, record) === "renewal"
     ? hasInitialPayroll(student) && isRenewalPayoutQualified(record)
-    : isInitialPayoutQualified(student, record);
+    : isInitialPayoutQualified(student);
 }
 
 function isPayrollCandidateForCycle(student: Student, cycle: CurrentCycleConfig) {
@@ -479,7 +495,7 @@ function qualificationLabel(student: Student, cycle: CurrentCycleConfig) {
     if (!hasInitialPayroll(student)) return "needs initial payroll";
     return isRenewalPayoutQualified(record) ? "renewal qualified" : "missing renewal requirements";
   }
-  return isInitialPayoutQualified(student, record) ? "initial payout qualified" : "missing initial requirements";
+  return isInitialPayoutQualified(student) ? "initial payout qualified" : "missing initial requirements";
 }
 
 function payrollStatusForDraft(student: Student, existingRecord: StudentSemesterRecord | null, draft: RenewalRecordDraft) {
@@ -638,10 +654,6 @@ function renewalHistoryCount(student: Student) {
   return Math.max(student.renewal_history?.filter((entry) => entry.status === "renewed").length || 0, semesterRenewals);
 }
 
-function isInRenewalScope(student: Student) {
-  return Boolean(student.claimed || student.renewed || student.renewal_history?.length || getSemesterRecords(student).length);
-}
-
 function downloadTextFile(filename: string, mimeType: string, content: string) {
   const blob = new Blob([content], { type: mimeType });
   const url = URL.createObjectURL(blob);
@@ -702,6 +714,10 @@ function truthyDocumentLabels(student: StudentDraft) {
 
 function requirementCompletionCount(requirements: StudentRequirementMap) {
   return requirementFields.filter((field) => requirements[field]).length;
+}
+
+function hasAnyInitialRequirement(requirements: StudentRequirementMap) {
+  return requirementCompletionCount(requirements) > 0;
 }
 
 function studentDraftFromAny(value: unknown): StudentDraft {
@@ -797,7 +813,7 @@ export function AppShell({
   const [validationDialog, setValidationDialog] = useState<ValidationDialogRequest | null>(null);
   const [studentReviewOpen, setStudentReviewOpen] = useState(false);
 
-  const visibleNavItems = APP_VIEWS.filter((item) => !item.adminOnly || isAdmin);
+  const visibleNavItems = useMemo(() => APP_VIEWS.filter((item) => !item.adminOnly || isAdmin), [isAdmin]);
 
   useEffect(() => {
     setActiveView(initialView);
@@ -807,6 +823,12 @@ export function AppShell({
   useEffect(() => {
     setCurrentCycleDraft(currentCycleDraftFromConfig(currentCycle));
   }, [currentCycle]);
+
+  useEffect(() => {
+    for (const item of visibleNavItems) {
+      router.prefetch(routeForView(item.view));
+    }
+  }, [router, visibleNavItems]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -1142,11 +1164,6 @@ export function AppShell({
     });
   }, [batchFilter, currentCycle, search, statusFilter, students]);
 
-  const renewalRows = useMemo(
-    () => students.filter(isInRenewalScope).sort((left, right) => left.full_name.localeCompare(right.full_name)),
-    [students]
-  );
-
   const selectedPayrollHistoryStudent = useMemo(
     () => students.find((student) => student.student_id === payrollHistoryStudentId) || null,
     [payrollHistoryStudentId, students]
@@ -1301,6 +1318,28 @@ export function AppShell({
     });
   }, [payrollRows]);
 
+  useEffect(() => {
+    if (activeView !== "requirements") return;
+
+    const rows = buildStudentTimelineDebugRows("requirements", requirementsCycle, requirementRows);
+    console.groupCollapsed(
+      `[SIS Requirements Timeline] ${requirementsCycle.cycle_key} | ${rows.length} visible student${rows.length === 1 ? "" : "s"}`
+    );
+    console.table(rows);
+    console.groupEnd();
+  }, [activeView, requirementRows, requirementsCycle]);
+
+  useEffect(() => {
+    if (activeView !== "payrolls") return;
+
+    const rows = buildStudentTimelineDebugRows("payrolls", payrollCycle, payrollRows);
+    console.groupCollapsed(
+      `[SIS Payroll Timeline] ${payrollCycle.cycle_key} | ${payrollTab} | ${rows.length} visible student${rows.length === 1 ? "" : "s"}`
+    );
+    console.table(rows);
+    console.groupEnd();
+  }, [activeView, payrollCycle, payrollRows, payrollTab]);
+
   const stats = useMemo(
     () => ({
       total: students.length,
@@ -1309,7 +1348,7 @@ export function AppShell({
       trash: trash.length,
       payrollRecords: payoutRecords.length
     }),
-    [currentCycle, payoutRecords.length, renewalRows, students, trash]
+    [currentCycle, payoutRecords.length, students, trash]
   );
 
   function showNotice(message: string, type: "success" | "error" | "info" = "success") {
@@ -1403,7 +1442,6 @@ export function AppShell({
   function navigate(view: AppViewName, overrides: Partial<PersistedShellState> = {}) {
     if (isAdminOnlyView(view) && !isAdmin) return;
     persistShellStateSnapshot(overrides);
-    setActiveView(view);
     setSidebarOpen(false);
     router.push(routeForView(view));
   }
@@ -1440,6 +1478,17 @@ export function AppShell({
         ...current.requirements,
         [field]: checked
       }
+    }));
+  }
+
+  function setAllStudentRequirements(checked: boolean) {
+    const nextRequirements = Object.fromEntries(
+      requirementFields.map((field) => [field, checked])
+    ) as StudentRequirementMap;
+
+    setStudentDraft((current) => ({
+      ...current,
+      requirements: nextRequirements
     }));
   }
 
@@ -1549,12 +1598,13 @@ export function AppShell({
       currentRecord
         ? {
             payout_type: getSemesterPayoutType(student, currentRecord),
-            initial_payout_requirements: getSemesterInitialPayoutRequirements(currentRecord),
+            initial_payout_requirements: getInitialPayoutRequirements(student),
             renewal_requirements: getSemesterRenewalRequirements(currentRecord),
             notes: currentRecord.notes || ""
           }
         : {
             ...emptyRenewalRecordDraft(),
+            initial_payout_requirements: getInitialPayoutRequirements(student),
             payout_type: hasInitialPayroll(student) ? "renewal" : "initial"
           }
     );
@@ -1679,7 +1729,10 @@ export function AppShell({
 
     const nextRecord = buildSemesterRecordForCycle(renewalRecordStudent, activeRenewalRecordCycle, renewalRecordDraft, currentUser);
     const currentRecords = getSemesterRecords(renewalRecordStudent);
-    const nextSemesterRecords = replaceSemesterRecord(currentRecords, nextRecord);
+    const nextSemesterRecords = replaceSemesterRecord(currentRecords, nextRecord).map((record) => ({
+      ...record,
+      initial_payout_requirements: renewalRecordDraft.initial_payout_requirements
+    }));
 
     const confirmed = await requestConfirmation({
       title: "Save Requirements",
@@ -1691,6 +1744,7 @@ export function AppShell({
     try {
       const updatedStudent = await withBusy(`renewal-record-${renewalRecordStudent.student_id}`, () =>
         updateStudent(renewalRecordStudent.student_id, {
+          requirements: renewalRecordDraft.initial_payout_requirements,
           semester_records: nextSemesterRecords
         })
       );
@@ -1703,7 +1757,7 @@ export function AppShell({
         action: "update",
         entity: "student_requirements",
         entity_id: updatedStudent.student_id,
-        summary: `Updated semester requirements for ${updatedStudent.full_name} in ${semesterLabel(activeRenewalRecordCycle)}.`,
+        summary: `Updated global initial requirements and semester renewal requirements for ${updatedStudent.full_name} in ${semesterLabel(activeRenewalRecordCycle)}.`,
         metadata: { student_id: updatedStudent.student_id, cycle_key: activeRenewalRecordCycle.cycle_key }
       });
       showNotice(`Renewal record saved for ${updatedStudent.full_name} in ${semesterLabel(activeRenewalRecordCycle)}.`);
@@ -2097,7 +2151,7 @@ export function AppShell({
                       payrolled_at: createdAt,
                       payrolled_by_uid: currentUser.uid,
                       payrolled_by_email: currentUser.email,
-                      initial_payout_requirements: getSemesterInitialPayoutRequirements(existingCycleRecord),
+                      initial_payout_requirements: getInitialPayoutRequirements(student),
                       renewal_requirements: getSemesterRenewalRequirements(existingCycleRecord),
                       requirements: getSemesterRenewalRequirements(existingCycleRecord),
                       created_at: existingCycleRecord?.created_at || createdAt,
@@ -2271,7 +2325,11 @@ export function AppShell({
                 <Field label="Phone">
                   <input value={studentDraft.phone_number} onChange={(event) => patchStudentDraft({ phone_number: event.currentTarget.value })} />
                 </Field>
-                <RequirementsChecklist draft={studentDraft} onRequirementChange={patchStudentRequirement} />
+                <RequirementsChecklist
+                  draft={studentDraft}
+                  onRequirementChange={patchStudentRequirement}
+                  onSetAllRequirements={setAllStudentRequirements}
+                />
                 <div className="form-actions">
                   <button type="submit" className="primary-button" disabled={busyKey === "student-submit"}>
                     {busyKey === "student-submit" ? "Saving..." : studentEditId ? "Update Student" : "Create Student"}
@@ -2550,10 +2608,9 @@ export function AppShell({
                   { key: "batch", label: "Batch", render: (student) => student.batch || "—" },
                   {
                     key: "initial_payout_requirements",
-                    label: isAdmin ? "Initial Payout" : "Initial Requirements",
+                    label: "Initial Requirements",
                     render: (student) => {
-                      const record = getSemesterRecordForCycle(student, requirementsCycle);
-                      const requirements = getSemesterInitialPayoutRequirements(record);
+                      const requirements = getInitialPayoutRequirements(student);
                       return `${requirementCompletionCount(requirements)}/${requirementFields.length}`;
                     }
                   },
@@ -2590,119 +2647,6 @@ export function AppShell({
                   }
                 ]}
                 rows={requirementRows}
-                getRowKey={(student) => student.student_id}
-              />
-            </Surface>
-          </div>
-        );
-      case "renewal":
-        return (
-          <div className="content-stack">
-            <SectionHeader eyebrow="Renewal" title="Cycle Requirements" description="Track one renewal record per student, per school year and semester, with the semester-specific requirements attached to that cycle." />
-            <Surface
-              title="Current Cycle"
-              subtitle={`Active cycle: ${semesterLabel(currentCycle)}. Renewal requirements for this cycle are Liquidation, Proof of Enrollment, and Latest Grades.`}
-            >
-              <div className="form-grid">
-                <Field label="School Year">
-                  <input
-                    value={currentCycleDraft.school_year}
-                    onChange={(event) => patchCurrentCycleDraft({ school_year: event.currentTarget.value })}
-                    disabled={!isAdmin}
-                    placeholder="2026-2027"
-                  />
-                </Field>
-                <Field label="Semester Number">
-                  <select
-                    value={currentCycleDraft.sem_number}
-                    onChange={(event) => patchCurrentCycleDraft({ sem_number: event.currentTarget.value })}
-                    disabled={!isAdmin}
-                  >
-                    <option value="1">1st Semester</option>
-                    <option value="2">2nd Semester</option>
-                  </select>
-                </Field>
-                <Field label="Cycle Status">
-                  <select
-                    value={currentCycleDraft.status}
-                    onChange={(event) =>
-                      patchCurrentCycleDraft({
-                        status: event.currentTarget.value as CurrentCycleConfig["status"]
-                      })
-                    }
-                    disabled={!isAdmin}
-                  >
-                    <option value="open">Open</option>
-                    <option value="locked">Locked</option>
-                    <option value="archived">Archived</option>
-                  </select>
-                </Field>
-                <Field label="Cycle Key">
-                  <input value={currentCycle.cycle_key} disabled />
-                </Field>
-                {isAdmin ? (
-                  <div className="form-actions">
-                    <button
-                      type="button"
-                      className="primary-button"
-                      onClick={handleSaveCurrentCycle}
-                      disabled={busyKey === "save-current-cycle"}
-                    >
-                      {busyKey === "save-current-cycle" ? "Saving..." : "Save Current Cycle"}
-                    </button>
-                  </div>
-                ) : null}
-              </div>
-            </Surface>
-            <Surface title="Renewal Queue" subtitle={`${renewalRows.length} students have renewal scope or renewal history for review in ${semesterLabel(currentCycle)}.`}>
-              <DataTable
-                columns={[
-                  { key: "id", label: "ID", render: (student) => student.student_id },
-                  { key: "name", label: "Student", render: (student) => student.full_name },
-                  { key: "school", label: "School", render: (student) => student.school_address || "—" },
-                  { key: "batch", label: "Batch", render: (student) => student.batch || "—" },
-                  {
-                    key: "profile_requirements",
-                    label: "Profile Requirements",
-                    render: (student) => {
-                      const requirements = getStudentRequirements(student);
-                      return `${requirementCompletionCount(requirements)}/${requirementFields.length}`;
-                    }
-                  },
-                  {
-                    key: "cycle_requirements",
-                    label: "Cycle Requirements",
-                    render: (student) => {
-                      const record = getSemesterRecordForCycle(student, currentCycle);
-                      return record
-                        ? `${renewalRequirementCompletionCount(getSemesterRenewalRequirements(record))}/${renewalRequirementFields.length}`
-                        : `0/${renewalRequirementFields.length}`;
-                    }
-                  },
-                  {
-                    key: "cycle_status",
-                    label: "Payroll Qualification",
-                    render: (student) => {
-                      const status = getSemesterPayrollStatus(student, currentCycle);
-                      return (
-                        <FlagPill
-                          active={status === "qualified" || status === "payrolled"}
-                          label={qualificationLabel(student, currentCycle)}
-                        />
-                      );
-                    }
-                  },
-                  {
-                    key: "actions",
-                    label: "Actions",
-                    render: (student) => (
-                      <button type="button" className="action-button" onClick={() => openRenewalRecord(student)}>
-                        Review Cycle Record
-                      </button>
-                    )
-                  }
-                ]}
-                rows={renewalRows}
                 getRowKey={(student) => student.student_id}
               />
             </Surface>
@@ -3506,7 +3450,7 @@ export function AppShell({
                 <strong>{requirementCompletionCount(getStudentRequirements(renewalRecordStudent))}/{requirementFields.length}</strong>
               </div>
               <div>
-                <span>{isAdmin ? "Initial Payout" : "Initial Requirements"}</span>
+                <span>Initial Requirements</span>
                 <strong>{requirementCompletionCount(renewalRecordDraft.initial_payout_requirements)}/{requirementFields.length}</strong>
               </div>
               <div>
@@ -3532,7 +3476,7 @@ export function AppShell({
             </div>
             <div className="dialog-history-panel">
               <div className="dialog-history-header">
-                <span>{isAdmin ? "Initial Payout Requirements" : "Initial Requirements"}</span>
+                <span>Initial Requirements (Global)</span>
                 <div className="dialog-history-actions">
                   <strong>{requirementCompletionCount(renewalRecordDraft.initial_payout_requirements)}</strong>
                   <button
@@ -3549,6 +3493,9 @@ export function AppShell({
                       : "Select All"}
                   </button>
                 </div>
+              </div>
+              <div className="inline-warning">
+                These six initial requirements are saved on the student record and apply across all school years.
               </div>
               <div className="document-grid">
                 {requirementFields.map((field) => (
@@ -3773,26 +3720,46 @@ function Field({
 
 function RequirementsChecklist({
   draft,
-  onRequirementChange
+  onRequirementChange,
+  onSetAllRequirements
 }: {
   draft: StudentDraft;
   onRequirementChange: (field: StudentRequirementKey, checked: boolean) => void;
+  onSetAllRequirements: (checked: boolean) => void;
 }) {
+  const completedCount = requirementCompletionCount(draft.requirements);
+  const allRequirementsReady = completedCount === requirementFields.length;
+
   return (
-    <div className="document-grid">
-      {requirementFields.map((field) => (
-        <label key={field} className="document-check">
-          <input
-            type="checkbox"
-            checked={draft.requirements[field]}
-            onChange={(event) => {
-              const checked = event.currentTarget.checked;
-              onRequirementChange(field, checked);
-            }}
-          />
-          <span>{REQUIREMENT_LABELS[field]}</span>
-        </label>
-      ))}
+    <div className="requirements-checklist">
+      <div className="dialog-history-header requirements-checklist-header">
+        <span>Requirements</span>
+        <div className="dialog-history-actions">
+          <strong>{completedCount}/{requirementFields.length}</strong>
+          <button
+            type="button"
+            className="secondary-button compact"
+            onClick={() => onSetAllRequirements(!allRequirementsReady)}
+          >
+            {allRequirementsReady ? "Deselect All" : "Select All"}
+          </button>
+        </div>
+      </div>
+      <div className="document-grid">
+        {requirementFields.map((field) => (
+          <label key={field} className="document-check">
+            <input
+              type="checkbox"
+              checked={draft.requirements[field]}
+              onChange={(event) => {
+                const checked = event.currentTarget.checked;
+                onRequirementChange(field, checked);
+              }}
+            />
+            <span>{REQUIREMENT_LABELS[field]}</span>
+          </label>
+        ))}
+      </div>
     </div>
   );
 }
