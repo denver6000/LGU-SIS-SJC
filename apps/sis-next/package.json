@@ -15,7 +15,8 @@
     "emu:student": "node scripts/emulator-suite.mjs student",
     "emu:requirements": "node scripts/emulator-suite.mjs requirements",
     "emu:auth-users": "node scripts/emulator-suite.mjs auth-users",
-    "emu:logs": "node scripts/emulator-suite.mjs logs"
+    "emu:logs": "node scripts/emulator-suite.mjs logs",
+    "prod:students:initial-payout": "node scripts/prod-mark-students-initial-payout.mjs"
   },
   "dependencies": {
     "@tanstack/react-virtual": "^3.13.24",

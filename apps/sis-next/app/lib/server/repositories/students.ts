@@ -286,6 +286,11 @@ function canMutatePayrollState(actor?: SessionUser | null) {
   return actor?.claims.admin === true || isAdminRole(actor?.claims.role);
 }
 
+function isRequirementsOnlyUpdate(input: StudentInput) {
+  const allowedFields = new Set<keyof StudentInput>(["requirements", "semester_records"]);
+  return Object.keys(input).every((key) => allowedFields.has(key as keyof StudentInput));
+}
+
 function preservePayrollFieldsForEncoder(input: StudentInput, existing: Student): StudentInput {
   const sanitized: StudentInput = { ...input };
   delete sanitized.renewed;
@@ -481,7 +486,12 @@ export async function updateStudent(studentId: string, input: StudentInput, acto
     }
 
     const existing = normalizeStudentRecord(snapshot.data() as Student, { student_id: studentId });
-    const sanitizedInput = canMutatePayrollState(actor) ? input : preservePayrollFieldsForEncoder(input, existing);
+    const canManageStudent = canMutatePayrollState(actor);
+    if (!canManageStudent && !isRequirementsOnlyUpdate(input)) {
+      throw new HttpError(403, "This action requires the admin role.");
+    }
+
+    const sanitizedInput = canManageStudent ? input : preservePayrollFieldsForEncoder(input, existing);
     const nextStudent = normalizeStudentRecord({ ...existing, ...sanitizedInput }, {
       student_id: studentId,
       created_at: existing.created_at || sanitizedInput.created_at || new Date().toISOString(),

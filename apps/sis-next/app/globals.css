@@ -712,7 +712,7 @@ table {
 }
 
 .payroll-filter-grid {
-  grid-template-columns: minmax(180px, 1.2fr) minmax(180px, 1.2fr) minmax(150px, 0.9fr) minmax(140px, 0.8fr) auto;
+  grid-template-columns: repeat(5, minmax(140px, 1fr)) auto;
 }
 
 .requirements-filter-actions {
@@ -1153,7 +1153,7 @@ table {
 .filter-strip,
 .inline-form {
   display: grid;
-  grid-template-columns: minmax(0, 1.7fr) repeat(2, minmax(180px, 1fr));
+  grid-template-columns: repeat(5, minmax(150px, 1fr));
   gap: 12px;
 }
 

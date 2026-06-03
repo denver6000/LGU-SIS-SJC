@@ -1,0 +1,24 @@
+
+> sis-next@0.1.0 dev
+> next dev -p 3000
+
+   ▲ Next.js 15.4.11
+   - Local:        http://localhost:3000
+   - Network:      http://192.168.100.14:3000
+   - Environments: .env.local
+
+ ✓ Starting...
+ ✓ Ready in 4.1s
+ ○ Compiling /registry ...
+ ✓ Compiled /registry in 12.5s (977 modules)
+ GET /registry 307 in 14911ms
+ ○ Compiling /login ...
+ ✓ Compiled /login in 2.3s (1036 modules)
+ GET /login 200 in 3449ms
+   ▲ Next.js 15.4.11
+   - Local:        http://localhost:3000
+   - Network:      http://192.168.100.14:3000
+   - Environments: .env.local
+
+ ✓ Starting...
+ ✓ Ready in 3.7s

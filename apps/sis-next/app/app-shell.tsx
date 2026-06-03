@@ -17,7 +17,6 @@ import {
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "./auth-provider";
-import { exportPayrollFiles } from "./lib/payroll-export";
 import { buildStudentTimelineDebugRows, hasPermanentPayroll, lifecyclePayoutType } from "./lib/models/student";
 import { APP_VIEWS, isAdminOnlyView, labelForView, routeForView, type AppViewName } from "./lib/shared/views";
 import {
@@ -151,18 +150,25 @@ type PersistedShellState = {
   requirementsNameFilter: string;
   requirementsSchoolFilter: string;
   requirementsBarangayFilter: string;
+  requirementsBatchFilter: string;
   selectedPayrollIds: string[];
   payrollTab: PayrollTab;
   payrollSchoolYear: string;
   payrollSemester: string;
   payrollNameFilter: string;
   payrollSchoolFilter: string;
+  payrollBarangayFilter: string;
   payrollStatusFilter: string;
   payrollBatchFilter: string;
   payrollMetadataDraft: PayrollMetadataDraft;
   payrollHistoryStudentId: string;
   payrollHistoryQuery: string;
+  payrollHistorySchoolFilter: string;
+  payrollHistoryBarangayFilter: string;
+  payrollHistoryBatchFilter: string;
   search: string;
+  studentSchoolFilter: string;
+  studentBarangayFilter: string;
   statusFilter: string;
   batchFilter: string;
 };
@@ -784,6 +790,7 @@ export function AppShell({
   const [requirementsNameFilter, setRequirementsNameFilter] = useState("");
   const [requirementsSchoolFilter, setRequirementsSchoolFilter] = useState("");
   const [requirementsBarangayFilter, setRequirementsBarangayFilter] = useState("");
+  const [requirementsBatchFilter, setRequirementsBatchFilter] = useState("all");
   const [catalogCollection, setCatalogCollection] = useState<OptionCollectionName>("barangays");
   const [catalogDraftName, setCatalogDraftName] = useState("");
   const [catalogEditId, setCatalogEditId] = useState<string | null>(null);
@@ -797,14 +804,20 @@ export function AppShell({
   const [payrollSemester, setPayrollSemester] = useState(String(initialData.currentCycle.sem_number));
   const [payrollNameFilter, setPayrollNameFilter] = useState("");
   const [payrollSchoolFilter, setPayrollSchoolFilter] = useState("");
+  const [payrollBarangayFilter, setPayrollBarangayFilter] = useState("");
   const [payrollStatusFilter, setPayrollStatusFilter] = useState("all");
   const [payrollBatchFilter, setPayrollBatchFilter] = useState("all");
   const [payrollMetadataDraft, setPayrollMetadataDraft] = useState<PayrollMetadataDraft>(() => emptyPayrollMetadataDraft());
   const [payrollHistoryStudentId, setPayrollHistoryStudentId] = useState("");
   const [payrollHistoryQuery, setPayrollHistoryQuery] = useState("");
+  const [payrollHistorySchoolFilter, setPayrollHistorySchoolFilter] = useState("");
+  const [payrollHistoryBarangayFilter, setPayrollHistoryBarangayFilter] = useState("");
+  const [payrollHistoryBatchFilter, setPayrollHistoryBatchFilter] = useState("all");
   const [payrollHistoryMenuOpen, setPayrollHistoryMenuOpen] = useState(false);
   const [actionsStudentId, setActionsStudentId] = useState("");
   const [search, setSearch] = useState("");
+  const [studentSchoolFilter, setStudentSchoolFilter] = useState("");
+  const [studentBarangayFilter, setStudentBarangayFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [batchFilter, setBatchFilter] = useState("all");
   const [busyKey, setBusyKey] = useState<string | null>(null);
@@ -856,18 +869,25 @@ export function AppShell({
         requirementsNameFilter?: string;
         requirementsSchoolFilter?: string;
         requirementsBarangayFilter?: string;
+        requirementsBatchFilter?: string;
         selectedPayrollIds?: string[];
         payrollTab?: PayrollTab | "unpayrolled" | "renewed";
         payrollSchoolYear?: string;
         payrollSemester?: string;
         payrollNameFilter?: string;
         payrollSchoolFilter?: string;
+        payrollBarangayFilter?: string;
         payrollStatusFilter?: string;
         payrollBatchFilter?: string;
         payrollMetadataDraft?: Partial<PayrollMetadataDraft>;
         payrollHistoryStudentId?: string;
         payrollHistoryQuery?: string;
+        payrollHistorySchoolFilter?: string;
+        payrollHistoryBarangayFilter?: string;
+        payrollHistoryBatchFilter?: string;
         search?: string;
+        studentSchoolFilter?: string;
+        studentBarangayFilter?: string;
         statusFilter?: string;
         batchFilter?: string;
       };
@@ -919,6 +939,7 @@ export function AppShell({
       if (typeof state.requirementsNameFilter === "string") setRequirementsNameFilter(state.requirementsNameFilter);
       if (typeof state.requirementsSchoolFilter === "string") setRequirementsSchoolFilter(state.requirementsSchoolFilter);
       if (typeof state.requirementsBarangayFilter === "string") setRequirementsBarangayFilter(state.requirementsBarangayFilter);
+      if (typeof state.requirementsBatchFilter === "string") setRequirementsBatchFilter(state.requirementsBatchFilter);
       if (Array.isArray(state.selectedPayrollIds)) setSelectedPayrollIds(new Set(state.selectedPayrollIds));
       if (state.payrollTab === "new" || state.payrollTab === "renewal") {
         setPayrollTab(state.payrollTab);
@@ -931,6 +952,7 @@ export function AppShell({
       if (typeof state.payrollSemester === "string") setPayrollSemester(state.payrollSemester);
       if (typeof state.payrollNameFilter === "string") setPayrollNameFilter(state.payrollNameFilter);
       if (typeof state.payrollSchoolFilter === "string") setPayrollSchoolFilter(state.payrollSchoolFilter);
+      if (typeof state.payrollBarangayFilter === "string") setPayrollBarangayFilter(state.payrollBarangayFilter);
       if (typeof state.payrollStatusFilter === "string") setPayrollStatusFilter(state.payrollStatusFilter);
       if (typeof state.payrollBatchFilter === "string") setPayrollBatchFilter(state.payrollBatchFilter);
       if (state.payrollMetadataDraft) {
@@ -938,7 +960,12 @@ export function AppShell({
       }
       if (typeof state.payrollHistoryStudentId === "string") setPayrollHistoryStudentId(state.payrollHistoryStudentId);
       if (typeof state.payrollHistoryQuery === "string") setPayrollHistoryQuery(state.payrollHistoryQuery);
+      if (typeof state.payrollHistorySchoolFilter === "string") setPayrollHistorySchoolFilter(state.payrollHistorySchoolFilter);
+      if (typeof state.payrollHistoryBarangayFilter === "string") setPayrollHistoryBarangayFilter(state.payrollHistoryBarangayFilter);
+      if (typeof state.payrollHistoryBatchFilter === "string") setPayrollHistoryBatchFilter(state.payrollHistoryBatchFilter);
       if (typeof state.search === "string") setSearch(state.search);
+      if (typeof state.studentSchoolFilter === "string") setStudentSchoolFilter(state.studentSchoolFilter);
+      if (typeof state.studentBarangayFilter === "string") setStudentBarangayFilter(state.studentBarangayFilter);
       if (typeof state.statusFilter === "string") setStatusFilter(state.statusFilter);
       if (typeof state.batchFilter === "string") setBatchFilter(state.batchFilter);
     } catch {
@@ -971,18 +998,25 @@ export function AppShell({
       requirementsNameFilter,
       requirementsSchoolFilter,
       requirementsBarangayFilter,
+      requirementsBatchFilter,
       selectedPayrollIds: [...selectedPayrollIds],
       payrollTab,
       payrollSchoolYear,
       payrollSemester,
       payrollNameFilter,
       payrollSchoolFilter,
+      payrollBarangayFilter,
       payrollStatusFilter,
       payrollBatchFilter,
       payrollMetadataDraft,
       payrollHistoryStudentId,
       payrollHistoryQuery,
+      payrollHistorySchoolFilter,
+      payrollHistoryBarangayFilter,
+      payrollHistoryBatchFilter,
       search,
+      studentSchoolFilter,
+      studentBarangayFilter,
       statusFilter,
       batchFilter
     };
@@ -1005,10 +1039,15 @@ export function AppShell({
     requirementsNameFilter,
     requirementsSchoolFilter,
     requirementsBarangayFilter,
+    requirementsBatchFilter,
     payrollHistoryQuery,
     payrollHistoryStudentId,
+    payrollHistorySchoolFilter,
+    payrollHistoryBarangayFilter,
+    payrollHistoryBatchFilter,
     payrollNameFilter,
     payrollSchoolFilter,
+    payrollBarangayFilter,
     payrollStatusFilter,
     payrollBatchFilter,
     payrollMetadataDraft,
@@ -1018,6 +1057,8 @@ export function AppShell({
     persistedStateKey,
     search,
     selectedPayrollIds,
+    studentSchoolFilter,
+    studentBarangayFilter,
     statusFilter,
     studentDraft,
     studentEditId
@@ -1136,23 +1177,18 @@ export function AppShell({
   );
 
   const filteredStudents = useMemo(() => {
-    const searchValue = search.trim().toLocaleLowerCase();
+    const nameFilter = search.trim().toLocaleLowerCase();
+    const schoolFilter = studentSchoolFilter.trim().toLocaleLowerCase();
+    const barangayFilter = studentBarangayFilter.trim().toLocaleLowerCase();
 
     return students.filter((student) => {
-      const haystack = [
-        student.student_id,
-        student.full_name,
-        student.student_number,
-        student.barangay,
-        student.school_address,
-        student.school_course,
-        student.year_level,
-        student.batch
-      ]
+      const nameHaystack = [student.full_name, student.student_id, student.student_number]
         .join(" ")
         .toLocaleLowerCase();
 
-      if (searchValue && !haystack.includes(searchValue)) return false;
+      if (nameFilter && !nameHaystack.includes(nameFilter)) return false;
+      if (schoolFilter && !String(student.school_address || "").toLocaleLowerCase().includes(schoolFilter)) return false;
+      if (barangayFilter && !String(student.barangay || "").toLocaleLowerCase().includes(barangayFilter)) return false;
       if (batchFilter !== "all" && student.batch !== batchFilter) return false;
       if (statusFilter === "renewed" && !isRenewedForCycle(student, currentCycle)) return false;
       if (statusFilter === "unrenewed" && isRenewedForCycle(student, currentCycle)) return false;
@@ -1162,7 +1198,7 @@ export function AppShell({
       if (statusFilter === "incomplete" && completionStatus(student) === "Complete") return false;
       return true;
     });
-  }, [batchFilter, currentCycle, search, statusFilter, students]);
+  }, [batchFilter, currentCycle, search, statusFilter, studentBarangayFilter, studentSchoolFilter, students]);
 
   const selectedPayrollHistoryStudent = useMemo(
     () => students.find((student) => student.student_id === payrollHistoryStudentId) || null,
@@ -1170,30 +1206,32 @@ export function AppShell({
   );
   const payrollHistorySearchResults = useMemo(() => {
     const query = payrollHistoryQuery.trim().toLocaleLowerCase();
+    const schoolFilter = payrollHistorySchoolFilter.trim().toLocaleLowerCase();
+    const barangayFilter = payrollHistoryBarangayFilter.trim().toLocaleLowerCase();
     const sortedStudents = students
       .slice()
       .sort((left, right) => left.full_name.localeCompare(right.full_name, undefined, { sensitivity: "base" }));
 
-    if (!query) {
-      return sortedStudents.slice(0, 10);
-    }
-
     return sortedStudents
-      .filter((student) =>
-        [
-          student.full_name,
-          student.student_id,
-          student.student_number,
-          student.school_address,
-          student.school_course,
-          student.batch
-        ]
+      .filter((student) => {
+        const nameHaystack = [student.full_name, student.student_id, student.student_number]
           .join(" ")
-          .toLocaleLowerCase()
-          .includes(query)
-      )
+          .toLocaleLowerCase();
+
+        if (query && !nameHaystack.includes(query)) return false;
+        if (schoolFilter && !String(student.school_address || "").toLocaleLowerCase().includes(schoolFilter)) return false;
+        if (barangayFilter && !String(student.barangay || "").toLocaleLowerCase().includes(barangayFilter)) return false;
+        if (payrollHistoryBatchFilter !== "all" && student.batch !== payrollHistoryBatchFilter) return false;
+        return true;
+      })
       .slice(0, 12);
-  }, [payrollHistoryQuery, students]);
+  }, [
+    payrollHistoryBarangayFilter,
+    payrollHistoryBatchFilter,
+    payrollHistoryQuery,
+    payrollHistorySchoolFilter,
+    students
+  ]);
   const actionsStudent = useMemo(
     () => students.find((student) => student.student_id === actionsStudentId) || null,
     [actionsStudentId, students]
@@ -1226,9 +1264,14 @@ export function AppShell({
     const schoolFilter = requirementsSchoolFilter.trim().toLocaleLowerCase();
     const barangayFilter = requirementsBarangayFilter.trim().toLocaleLowerCase();
     const cycleFilteredStudents = students.filter((student) => {
-      if (nameFilter && !student.full_name.toLocaleLowerCase().includes(nameFilter)) return false;
+      const nameHaystack = [student.full_name, student.student_id, student.student_number]
+        .join(" ")
+        .toLocaleLowerCase();
+
+      if (nameFilter && !nameHaystack.includes(nameFilter)) return false;
       if (schoolFilter && !String(student.school_address || "").toLocaleLowerCase().includes(schoolFilter)) return false;
       if (barangayFilter && !String(student.barangay || "").toLocaleLowerCase().includes(barangayFilter)) return false;
+      if (requirementsBatchFilter !== "all" && student.batch !== requirementsBatchFilter) return false;
       return true;
     });
     const rows = isAdmin
@@ -1241,6 +1284,7 @@ export function AppShell({
   }, [
     isAdmin,
     requirementsBarangayFilter,
+    requirementsBatchFilter,
     requirementsCycle,
     requirementsNameFilter,
     requirementsSchoolFilter,
@@ -1279,14 +1323,20 @@ export function AppShell({
   const payrollFilteredStudents = useMemo(() => {
     const nameFilter = payrollNameFilter.trim().toLocaleLowerCase();
     const schoolFilter = payrollSchoolFilter.trim().toLocaleLowerCase();
+    const barangayFilter = payrollBarangayFilter.trim().toLocaleLowerCase();
 
     return students.filter((student) => {
-      if (nameFilter && !String(student.full_name || "").toLocaleLowerCase().includes(nameFilter)) return false;
+      const nameHaystack = [student.full_name, student.student_id, student.student_number]
+        .join(" ")
+        .toLocaleLowerCase();
+
+      if (nameFilter && !nameHaystack.includes(nameFilter)) return false;
       if (schoolFilter && !String(student.school_address || "").toLocaleLowerCase().includes(schoolFilter)) return false;
+      if (barangayFilter && !String(student.barangay || "").toLocaleLowerCase().includes(barangayFilter)) return false;
       if (payrollBatchFilter !== "all" && student.batch !== payrollBatchFilter) return false;
       return true;
     });
-  }, [payrollBatchFilter, payrollNameFilter, payrollSchoolFilter, students]);
+  }, [payrollBarangayFilter, payrollBatchFilter, payrollNameFilter, payrollSchoolFilter, students]);
 
   const payrollRows = useMemo(() => {
     const payoutType = payrollTab === "renewal" ? "renewal" : "initial";
@@ -1394,7 +1444,7 @@ export function AppShell({
   function persistShellStateSnapshot(overrides: Partial<PersistedShellState> = {}) {
     if (typeof window === "undefined") return;
 
-    const nextState: PersistedShellState = {
+    const baseState: PersistedShellState = {
       version: 3,
       catalogCollection,
       catalogDraftName,
@@ -1413,22 +1463,29 @@ export function AppShell({
       requirementsNameFilter,
       requirementsSchoolFilter,
       requirementsBarangayFilter,
+      requirementsBatchFilter,
       selectedPayrollIds: [...selectedPayrollIds],
       payrollTab,
       payrollSchoolYear,
       payrollSemester,
       payrollNameFilter,
       payrollSchoolFilter,
+      payrollBarangayFilter,
       payrollStatusFilter,
       payrollBatchFilter,
       payrollMetadataDraft,
       payrollHistoryStudentId,
       payrollHistoryQuery,
+      payrollHistorySchoolFilter,
+      payrollHistoryBarangayFilter,
+      payrollHistoryBatchFilter,
       search,
+      studentSchoolFilter,
+      studentBarangayFilter,
       statusFilter,
-      batchFilter,
-      ...overrides
+      batchFilter
     };
+    const nextState = { ...baseState, ...overrides };
 
     window.localStorage.setItem(persistedStateKey, JSON.stringify(nextState));
     window.sessionStorage.setItem(persistedScrollKey, String(window.scrollY));
@@ -2112,6 +2169,7 @@ export function AppShell({
         sem_number: String(payrollCycle.sem_number)
       };
       const groupCount = await withBusy("export-payroll", async () => {
+        const { exportPayrollFiles } = await import("./lib/payroll-export");
         const exportedGroupCount = await exportPayrollFiles(selectedPayrollRows, exportMetadata, payrollId);
         const [createdRecords, updatedStudents] = await Promise.all([
           Promise.all(
@@ -2340,6 +2398,58 @@ export function AppShell({
                 </div>
               </form>
             </Surface>
+            <FilterBar
+              name={search}
+              school={studentSchoolFilter}
+              barangay={studentBarangayFilter}
+              status={statusFilter}
+              batch={batchFilter}
+              batchOptions={batchOptions}
+              showAdminStatusFilters={isAdmin}
+              onNameChange={setSearch}
+              onSchoolChange={setStudentSchoolFilter}
+              onBarangayChange={setStudentBarangayFilter}
+              onStatusChange={setStatusFilter}
+              onBatchChange={setBatchFilter}
+            />
+            <Surface title="Student List" subtitle={`${filteredStudents.length} active student records match the current filters.`}>
+              <DataTable
+                columns={[
+                  { key: "id", label: "ID", render: (student) => student.student_id },
+                  { key: "name", label: "Student", render: (student) => student.full_name },
+                  { key: "number", label: "Student No.", render: (student) => student.student_number || "—" },
+                  { key: "school", label: "School", render: (student) => student.school_address || "—" },
+                  { key: "course", label: "Course", render: (student) => student.school_course || "—" },
+                  { key: "batch", label: "Batch", render: (student) => student.batch || "—" },
+                  { key: "requirements", label: "Requirements", render: (student) => completionStatus(student) },
+                  ...(isAdmin
+                    ? [
+                        {
+                          key: "actions",
+                          label: "Actions",
+                          render: (student: Student) => (
+                            <div className="row-actions">
+                              <button type="button" className="action-button" onClick={() => fillStudentDraft(student)}>
+                                Edit
+                              </button>
+                              <button
+                                type="button"
+                                className="action-button danger"
+                                onClick={() => handleMoveToTrash(student)}
+                                disabled={busyKey === `trash-${student.student_id}`}
+                              >
+                                {busyKey === `trash-${student.student_id}` ? "Moving..." : "Move To Trash"}
+                              </button>
+                            </div>
+                          )
+                        }
+                      ]
+                    : [])
+                ]}
+                rows={filteredStudents}
+                getRowKey={(student) => student.student_id}
+              />
+            </Surface>
           </div>
         );
       case "records":
@@ -2347,12 +2457,16 @@ export function AppShell({
           <div className="content-stack">
             <SectionHeader eyebrow="Records" title="Scholarship Listing" description="Search, filter, edit, and recycle scholarship records from one flat workspace." />
             <FilterBar
-              search={search}
+              name={search}
+              school={studentSchoolFilter}
+              barangay={studentBarangayFilter}
               status={statusFilter}
               batch={batchFilter}
               batchOptions={batchOptions}
               showAdminStatusFilters={isAdmin}
-              onSearchChange={setSearch}
+              onNameChange={setSearch}
+              onSchoolChange={setStudentSchoolFilter}
+              onBarangayChange={setStudentBarangayFilter}
               onStatusChange={setStatusFilter}
               onBatchChange={setBatchFilter}
             />
@@ -2418,53 +2532,95 @@ export function AppShell({
                     : "Select a student to review payroll traces after confirming the requirements and renewal flow."
                 }
               >
-                <div className="inline-form payroll-history-controls">
-                  <div className="search-select">
+                <div className="requirements-filter-grid">
+                  <Field label="Student Name">
+                    <div className="search-select">
+                      <input
+                        type="search"
+                        value={payrollHistoryQuery}
+                        placeholder="Search name or ID"
+                        onFocus={() => setPayrollHistoryMenuOpen(true)}
+                        onBlur={() => {
+                          window.setTimeout(() => setPayrollHistoryMenuOpen(false), 120);
+                        }}
+                        onChange={(event) => {
+                          setPayrollHistoryQuery(event.currentTarget.value);
+                          setPayrollHistoryStudentId("");
+                          setPayrollHistoryMenuOpen(true);
+                        }}
+                      />
+                      {payrollHistoryMenuOpen ? (
+                        <div className="search-select-menu" role="listbox" aria-label="Payroll history students">
+                          {payrollHistorySearchResults.length ? (
+                            payrollHistorySearchResults.map((student) => (
+                              <button
+                                key={student.student_id}
+                                type="button"
+                                className="search-select-option"
+                                onMouseDown={(event) => event.preventDefault()}
+                                onClick={() => selectPayrollHistoryStudent(student)}
+                              >
+                                <strong>{student.full_name}</strong>
+                                <span>
+                                  {student.student_id}
+                                  {student.barangay ? ` • ${student.barangay}` : ""}
+                                  {student.batch ? ` • Batch ${student.batch}` : ""}
+                                  {student.school_course ? ` • ${student.school_course}` : ""}
+                                </span>
+                              </button>
+                            ))
+                          ) : (
+                            <div className="search-select-empty">No students matched those filters.</div>
+                          )}
+                        </div>
+                      ) : null}
+                    </div>
+                  </Field>
+                  <Field label="School">
                     <input
                       type="search"
-                      value={payrollHistoryQuery}
-                      placeholder="Search student name, ID, number, school, course, batch"
-                      onFocus={() => setPayrollHistoryMenuOpen(true)}
-                      onBlur={() => {
-                        window.setTimeout(() => setPayrollHistoryMenuOpen(false), 120);
-                      }}
+                      value={payrollHistorySchoolFilter}
+                      placeholder="Search school"
                       onChange={(event) => {
-                        setPayrollHistoryQuery(event.currentTarget.value);
+                        setPayrollHistorySchoolFilter(event.currentTarget.value);
                         setPayrollHistoryStudentId("");
-                        setPayrollHistoryMenuOpen(true);
                       }}
                     />
-                    {payrollHistoryMenuOpen ? (
-                      <div className="search-select-menu" role="listbox" aria-label="Payroll history students">
-                        {payrollHistorySearchResults.length ? (
-                          payrollHistorySearchResults.map((student) => (
-                            <button
-                              key={student.student_id}
-                              type="button"
-                              className="search-select-option"
-                              onMouseDown={(event) => event.preventDefault()}
-                              onClick={() => selectPayrollHistoryStudent(student)}
-                            >
-                              <strong>{student.full_name}</strong>
-                              <span>
-                                {student.student_id}
-                                {student.batch ? ` • Batch ${student.batch}` : ""}
-                                {student.school_course ? ` • ${student.school_course}` : ""}
-                              </span>
-                            </button>
-                          ))
-                        ) : (
-                          <div className="search-select-empty">No students matched that search.</div>
-                        )}
-                      </div>
-                    ) : null}
-                  </div>
+                  </Field>
+                  <Field label="Barangay">
+                    <input
+                      type="search"
+                      value={payrollHistoryBarangayFilter}
+                      placeholder="Search barangay"
+                      onChange={(event) => {
+                        setPayrollHistoryBarangayFilter(event.currentTarget.value);
+                        setPayrollHistoryStudentId("");
+                      }}
+                    />
+                  </Field>
+                  <Field label="Batch">
+                    <select
+                      value={payrollHistoryBatchFilter}
+                      onChange={(event) => {
+                        setPayrollHistoryBatchFilter(event.currentTarget.value);
+                        setPayrollHistoryStudentId("");
+                      }}
+                    >
+                      <option value="all">All batches</option>
+                      {batchOptions.map((option) => (
+                        <option key={option} value={option}>{option}</option>
+                      ))}
+                    </select>
+                  </Field>
                   <button
                     type="button"
                     className="secondary-button"
                     onClick={() => {
                       setPayrollHistoryStudentId("");
                       setPayrollHistoryQuery("");
+                      setPayrollHistorySchoolFilter("");
+                      setPayrollHistoryBarangayFilter("");
+                      setPayrollHistoryBatchFilter("all");
                       setPayrollHistoryMenuOpen(false);
                     }}
                   >
@@ -2586,6 +2742,14 @@ export function AppShell({
                     onChange={(event) => setRequirementsBarangayFilter(event.currentTarget.value)}
                   />
                 </Field>
+                <Field label="Batch">
+                  <select value={requirementsBatchFilter} onChange={(event) => setRequirementsBatchFilter(event.currentTarget.value)}>
+                    <option value="all">All batches</option>
+                    {batchOptions.map((option) => (
+                      <option key={option} value={option}>{option}</option>
+                    ))}
+                  </select>
+                </Field>
                 <div className="requirements-filter-actions">
                   <button
                     type="button"
@@ -2594,6 +2758,7 @@ export function AppShell({
                       setRequirementsNameFilter("");
                       setRequirementsSchoolFilter("");
                       setRequirementsBarangayFilter("");
+                      setRequirementsBatchFilter("all");
                     }}
                   >
                     Clear Filters
@@ -2937,6 +3102,14 @@ export function AppShell({
                     onChange={(event) => setPayrollSchoolFilter(event.currentTarget.value)}
                   />
                 </Field>
+                <Field label="Barangay">
+                  <input
+                    type="search"
+                    value={payrollBarangayFilter}
+                    placeholder="Search barangay"
+                    onChange={(event) => setPayrollBarangayFilter(event.currentTarget.value)}
+                  />
+                </Field>
                 <Field label="Status">
                   <select value={payrollStatusFilter} onChange={(event) => setPayrollStatusFilter(event.currentTarget.value)}>
                     <option value="all">All statuses</option>
@@ -2961,6 +3134,7 @@ export function AppShell({
                     onClick={() => {
                       setPayrollNameFilter("");
                       setPayrollSchoolFilter("");
+                      setPayrollBarangayFilter("");
                       setPayrollStatusFilter("all");
                       setPayrollBatchFilter("all");
                     }}
@@ -3765,46 +3939,71 @@ function RequirementsChecklist({
 }
 
 function FilterBar({
-  search,
+  name,
+  school,
+  barangay,
   status,
   batch,
   batchOptions,
   showAdminStatusFilters,
-  onSearchChange,
+  onNameChange,
+  onSchoolChange,
+  onBarangayChange,
   onStatusChange,
   onBatchChange
 }: {
-  search: string;
+  name: string;
+  school: string;
+  barangay: string;
   status: string;
   batch: string;
   batchOptions: string[];
   showAdminStatusFilters: boolean;
-  onSearchChange: (value: string) => void;
+  onNameChange: (value: string) => void;
+  onSchoolChange: (value: string) => void;
+  onBarangayChange: (value: string) => void;
   onStatusChange: (value: string) => void;
   onBatchChange: (value: string) => void;
 }) {
   return (
     <div className="filter-strip">
-      <input type="search" value={search} placeholder="Search name, ID, school, course, batch" onChange={(event) => onSearchChange(event.currentTarget.value)} />
-      <select value={status} onChange={(event) => onStatusChange(event.currentTarget.value)}>
-        <option value="all">All statuses</option>
-        <option value="complete">Complete requirements</option>
-        <option value="incomplete">Incomplete requirements</option>
-        {showAdminStatusFilters ? (
-          <>
-            <option value="renewed">Payroll qualified</option>
-            <option value="unrenewed">Not qualified</option>
-            <option value="payrolled">Payroll prepared</option>
-            <option value="unpayrolled">Payroll not prepared</option>
-          </>
-        ) : null}
-      </select>
-      <select value={batch} onChange={(event) => onBatchChange(event.currentTarget.value)}>
-        <option value="all">All batches</option>
-        {batchOptions.map((option) => (
-          <option key={option} value={option}>{option}</option>
-        ))}
-      </select>
+      <label className="field">
+        <span>Student Name</span>
+        <input type="search" value={name} placeholder="Search name or ID" onChange={(event) => onNameChange(event.currentTarget.value)} />
+      </label>
+      <label className="field">
+        <span>School</span>
+        <input type="search" value={school} placeholder="Search school" onChange={(event) => onSchoolChange(event.currentTarget.value)} />
+      </label>
+      <label className="field">
+        <span>Barangay</span>
+        <input type="search" value={barangay} placeholder="Search barangay" onChange={(event) => onBarangayChange(event.currentTarget.value)} />
+      </label>
+      <label className="field">
+        <span>Status</span>
+        <select value={status} onChange={(event) => onStatusChange(event.currentTarget.value)}>
+          <option value="all">All statuses</option>
+          <option value="complete">Complete requirements</option>
+          <option value="incomplete">Incomplete requirements</option>
+          {showAdminStatusFilters ? (
+            <>
+              <option value="renewed">Payroll qualified</option>
+              <option value="unrenewed">Not qualified</option>
+              <option value="payrolled">Payroll prepared</option>
+              <option value="unpayrolled">Payroll not prepared</option>
+            </>
+          ) : null}
+        </select>
+      </label>
+      <label className="field">
+        <span>Batch</span>
+        <select value={batch} onChange={(event) => onBatchChange(event.currentTarget.value)}>
+          <option value="all">All batches</option>
+          {batchOptions.map((option) => (
+            <option key={option} value={option}>{option}</option>
+          ))}
+        </select>
+      </label>
     </div>
   );
 }

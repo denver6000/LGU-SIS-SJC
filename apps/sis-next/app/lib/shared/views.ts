@@ -32,6 +32,7 @@ export function isAdminOnlyView(view: AppViewName) {
 }
 
 export function routeForView(view: AppViewName) {
+  if (view === "register") return "/registry";
   return `/${view}`;
 }
 

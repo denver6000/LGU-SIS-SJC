@@ -1,0 +1,6 @@
+ ⚠ Warning: Found multiple lockfiles. Selecting C:\Users\giyut\Documents\ProjectsForOtherPeeps\SamWebsite\package-lock.json.
+   Consider removing the lockfiles at:
+   * C:\Users\giyut\Documents\ProjectsForOtherPeeps\SamWebsite\SamStaticFirebase\apps\sis-next\package-lock.json
+   * C:\Users\giyut\Documents\ProjectsForOtherPeeps\SamWebsite\SamStaticFirebase\package-lock.json
+
+ ⚠ Found a change in next.config.mjs. Restarting the server to apply the changes...
