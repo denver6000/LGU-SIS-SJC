@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { FormEvent, useEffect, useState } from "react";
-import { signInWithEmailAndPassword } from "firebase/auth";
+import { sendPasswordResetEmail, signInWithEmailAndPassword } from "firebase/auth";
 import { LockKeyhole, Mail } from "lucide-react";
 import { firebaseAuth } from "../lib/firebase-client";
 import { useAuth } from "../auth-provider";
@@ -28,6 +28,7 @@ export default function LoginPage() {
   const router = useRouter();
   const [message, setMessage] = useState(user ? "You are already signed in." : "");
   const [isBusy, setIsBusy] = useState(false);
+  const [isResetBusy, setIsResetBusy] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
 
@@ -35,7 +36,7 @@ export default function LoginPage() {
     const signedOutMessage = window.sessionStorage.getItem(SIGNED_OUT_MESSAGE_KEY);
     if (!signedOutMessage) return;
 
-    setMessage("Signed out successfully.");
+    setMessage(signedOutMessage === "1" ? "Signed out successfully." : signedOutMessage);
     window.sessionStorage.removeItem(SIGNED_OUT_MESSAGE_KEY);
   }, []);
 
@@ -104,6 +105,27 @@ export default function LoginPage() {
     }
   }
 
+  async function handleForgotPassword() {
+    const normalizedEmail = email.trim();
+
+    if (!normalizedEmail) {
+      setMessage("Enter your email address first, then request a password reset.");
+      return;
+    }
+
+    setIsResetBusy(true);
+    setMessage("Sending password reset email...");
+
+    try {
+      await sendPasswordResetEmail(firebaseAuth, normalizedEmail);
+      setMessage("Password reset email sent. Check your inbox for the reset link.");
+    } catch (error) {
+      setMessage(loginErrorMessage(error));
+    } finally {
+      setIsResetBusy(false);
+    }
+  }
+
   return (
     <main className="login-page">
       <section className="login-shell" aria-labelledby="authTitle">
@@ -160,6 +182,14 @@ export default function LoginPage() {
           <div className="login-actions">
             <button type="submit" className="primary" disabled={isBusy}>
               {isBusy ? "Signing In..." : "Sign In"}
+            </button>
+            <button
+              type="button"
+              className="secondary-button"
+              disabled={isBusy || isResetBusy}
+              onClick={handleForgotPassword}
+            >
+              {isResetBusy ? "Sending Reset..." : "Forgot Password"}
             </button>
           </div>
         </form>

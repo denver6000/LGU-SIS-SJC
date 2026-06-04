@@ -11,12 +11,15 @@ import {
   ShieldUser,
   SlidersHorizontal,
   Trash2,
+  UserRound,
   UserRoundPlus,
   X
 } from "lucide-react";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { updateEmail, updatePassword, updateProfile } from "firebase/auth";
 import { useAuth } from "./auth-provider";
+import { firebaseAuth } from "./lib/firebase-client";
 import { buildStudentTimelineDebugRows, hasPermanentPayroll, lifecyclePayoutType } from "./lib/models/student";
 import { APP_VIEWS, isAdminOnlyView, labelForView, routeForView, type AppViewName } from "./lib/shared/views";
 import {
@@ -96,6 +99,13 @@ type ManagedUserDraft = {
   password: string;
   displayName: string;
   role: string;
+};
+
+type ProfileDraft = {
+  displayName: string;
+  email: string;
+  newPassword: string;
+  confirmPassword: string;
 };
 
 type CurrentCycleDraft = {
@@ -179,6 +189,7 @@ const navIcons: Record<AppViewName, React.ComponentType<{ size?: number }>> = {
   register: UserRoundPlus,
   requirements: ListChecks,
   records: ClipboardList,
+  profiles: UserRound,
   users: ShieldUser,
   payrolls: FileDown,
   trash: Trash2
@@ -299,6 +310,15 @@ function emptyManagedUserDraft(): ManagedUserDraft {
   };
 }
 
+function profileDraftFromUser(user: { name?: string; email?: string } | null | undefined): ProfileDraft {
+  return {
+    displayName: String(user?.name ?? "").trim(),
+    email: String(user?.email ?? "").trim(),
+    newPassword: "",
+    confirmPassword: ""
+  };
+}
+
 function currentCycleDraftFromConfig(config: CurrentCycleConfig): CurrentCycleDraft {
   return {
     school_year: config.school_year,
@@ -404,6 +424,36 @@ function invalidManagedUserFields(draft: ManagedUserDraft, isEditing: boolean) {
   if (!draft.role.trim()) fields.push("Role");
 
   return fields;
+}
+
+function invalidProfileFields(draft: ProfileDraft) {
+  const fields: string[] = [];
+  const email = draft.email.trim();
+  const password = draft.newPassword;
+
+  if (!draft.displayName.trim()) fields.push("Name");
+  if (!email || !email.includes("@")) fields.push("Email");
+  if (password && password.length < 6) fields.push("Password must be at least 6 characters");
+  if (password !== draft.confirmPassword) fields.push("Password confirmation");
+
+  return fields;
+}
+
+function profileUpdateErrorMessage(error: unknown) {
+  if (!error || typeof error !== "object") {
+    return error instanceof Error ? error.message : "Unable to update profile.";
+  }
+
+  const code = (error as { code?: string }).code;
+  if (code === "auth/requires-recent-login") {
+    return "For security, sign out and sign back in before changing your email or password.";
+  }
+  if (code === "auth/email-already-in-use") return "That email address is already used by another account.";
+  if (code === "auth/invalid-email") return "Enter a valid email address.";
+  if (code === "auth/weak-password") return "Choose a stronger password.";
+  if (code === "auth/network-request-failed") return "Firebase Auth could not be reached. Check your connection and try again.";
+
+  return error instanceof Error ? error.message : "Unable to update profile.";
 }
 
 function getStudentRequirements(
@@ -758,7 +808,7 @@ export function AppShell({
   initialData: AppInitialData;
   initialView: AppViewName;
 }) {
-  const { user, signOutUser } = useAuth();
+  const { user, refreshSession, signOutUser } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
   const currentUser = user || initialData.user;
@@ -798,6 +848,7 @@ export function AppShell({
   const [studentEditId, setStudentEditId] = useState<string | null>(null);
   const [managedUserDraft, setManagedUserDraft] = useState<ManagedUserDraft>(() => emptyManagedUserDraft());
   const [managedUserEditId, setManagedUserEditId] = useState<string | null>(null);
+  const [profileDraft, setProfileDraft] = useState<ProfileDraft>(() => profileDraftFromUser(initialData.user));
   const [selectedPayrollIds, setSelectedPayrollIds] = useState<Set<string>>(() => new Set());
   const [payrollTab, setPayrollTab] = useState<PayrollTab>("new");
   const [payrollSchoolYear, setPayrollSchoolYear] = useState(initialData.currentCycle.school_year);
@@ -836,6 +887,14 @@ export function AppShell({
   useEffect(() => {
     setCurrentCycleDraft(currentCycleDraftFromConfig(currentCycle));
   }, [currentCycle]);
+
+  useEffect(() => {
+    setProfileDraft((current) => ({
+      ...profileDraftFromUser(currentUser),
+      newPassword: current.newPassword,
+      confirmPassword: current.confirmPassword
+    }));
+  }, [currentUser.email, currentUser.name, currentUser.uid]);
 
   useEffect(() => {
     for (const item of visibleNavItems) {
@@ -1434,6 +1493,7 @@ export function AppShell({
   function busyMessage() {
     if (!busyKey) return "";
     if (busyKey === "export-payroll") return "Creating payroll files and recording cycle updates.";
+    if (busyKey === "profile-update") return "Updating your profile.";
     if (busyKey.includes("delete")) return "Deleting the selected record.";
     if (busyKey.includes("trash")) return "Moving the student record to trash.";
     if (busyKey.includes("restore")) return "Restoring the student record.";
@@ -1934,6 +1994,109 @@ export function AppShell({
       showNotice(`${student.full_name} permanently deleted from trash.`);
     } catch (error) {
       showNotice(error instanceof Error ? error.message : "Unable to delete trash record.", "error");
+    }
+  }
+
+  async function handleProfileSubmit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    const invalidFields = invalidProfileFields(profileDraft);
+    if (invalidFields.length) {
+      showValidationDialog({
+        title: "Complete Profile Details",
+        message: "Review the profile fields before saving your account changes.",
+        fields: invalidFields,
+        acknowledgeLabel: "Review Profile"
+      });
+      return;
+    }
+
+    const authUser = firebaseAuth.currentUser;
+    if (!authUser) {
+      showNotice("Your Firebase session is not ready. Sign in again before updating your profile.", "error");
+      return;
+    }
+
+    const displayName = profileDraft.displayName.trim();
+    const email = profileDraft.email.trim();
+    const password = profileDraft.newPassword;
+    const emailChanged = email !== String(authUser.email || "").trim();
+    const passwordChanged = Boolean(password);
+    const changes = [
+      displayName !== String(authUser.displayName || "").trim() ? "name" : "",
+      emailChanged ? "email" : "",
+      passwordChanged ? "password" : ""
+    ].filter(Boolean);
+
+    if (!changes.length) {
+      showNotice("No profile changes to save.", "info");
+      return;
+    }
+
+    const confirmed = await requestConfirmation({
+      title: "Update Profile",
+      message:
+        emailChanged || passwordChanged
+          ? `Save changes to your ${changes.join(", ")}? You will be signed out and asked to sign in again.`
+          : `Save changes to your ${changes.join(", ")}?`,
+      confirmLabel: "Save Profile"
+    });
+    if (!confirmed) return;
+
+    try {
+      await withBusy("profile-update", async () => {
+        if (displayName !== String(authUser.displayName || "").trim()) {
+          await updateProfile(authUser, { displayName });
+        }
+        if (emailChanged) {
+          await updateEmail(authUser, email);
+        }
+        if (passwordChanged) {
+          await updatePassword(authUser, password);
+        }
+
+        if (emailChanged || passwordChanged) {
+          window.sessionStorage.setItem(
+            signedOutMessageKey,
+            emailChanged && passwordChanged
+              ? "Email and password updated. Please sign in again with your updated credentials."
+              : emailChanged
+                ? "Email updated. Please sign in again with your new email."
+                : "Password updated. Please sign in again."
+          );
+          window.localStorage.removeItem(persistedStateKey);
+          window.sessionStorage.removeItem(persistedScrollKey);
+          await signOutUser();
+          window.location.assign("/login");
+          return;
+        }
+
+        const idToken = await authUser.getIdToken(true);
+        const response = await fetch("/api/auth/session", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ idToken })
+        });
+        if (!response.ok) {
+          const data = (await response.json().catch(() => ({}))) as { message?: string };
+          throw new Error(data.message || "Profile saved, but the session could not refresh.");
+        }
+
+        await refreshSession();
+      });
+
+      if (emailChanged || passwordChanged) return;
+
+      setProfileDraft((current) => ({
+        ...current,
+        displayName,
+        email,
+        newPassword: "",
+        confirmPassword: ""
+      }));
+      showNotice("Profile updated.");
+    } catch (error) {
+      showNotice(profileUpdateErrorMessage(error), "error");
     }
   }
 
@@ -2814,6 +2977,80 @@ export function AppShell({
                 rows={requirementRows}
                 getRowKey={(student) => student.student_id}
               />
+            </Surface>
+          </div>
+        );
+      case "profiles":
+        return (
+          <div className="content-stack">
+            <SectionHeader
+              eyebrow="Profiles"
+              title="Account Profile"
+              description="Update your account name, email address, and password from your signed-in session."
+            />
+            <Surface
+              title="Your Profile"
+              subtitle={`Signed in as ${currentUser.email || currentUser.name}.`}
+            >
+              <form className="form-grid" onSubmit={handleProfileSubmit} noValidate>
+                <Field label="Name">
+                  <input
+                    value={profileDraft.displayName}
+                    autoComplete="name"
+                    onChange={(event) => {
+                      const value = event.currentTarget.value;
+                      setProfileDraft((current) => ({ ...current, displayName: value }));
+                    }}
+                  />
+                </Field>
+                <Field label="Email">
+                  <input
+                    type="email"
+                    value={profileDraft.email}
+                    autoComplete="email"
+                    onChange={(event) => {
+                      const value = event.currentTarget.value;
+                      setProfileDraft((current) => ({ ...current, email: value }));
+                    }}
+                  />
+                </Field>
+                <Field label="New Password">
+                  <input
+                    type="password"
+                    value={profileDraft.newPassword}
+                    autoComplete="new-password"
+                    placeholder="Leave blank to keep current password"
+                    onChange={(event) => {
+                      const value = event.currentTarget.value;
+                      setProfileDraft((current) => ({ ...current, newPassword: value }));
+                    }}
+                  />
+                </Field>
+                <Field label="Confirm Password">
+                  <input
+                    type="password"
+                    value={profileDraft.confirmPassword}
+                    autoComplete="new-password"
+                    placeholder="Repeat new password"
+                    onChange={(event) => {
+                      const value = event.currentTarget.value;
+                      setProfileDraft((current) => ({ ...current, confirmPassword: value }));
+                    }}
+                  />
+                </Field>
+                <div className="form-actions">
+                  <button type="submit" className="primary-button" disabled={busyKey === "profile-update"}>
+                    {busyKey === "profile-update" ? "Saving..." : "Save Profile"}
+                  </button>
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    onClick={() => setProfileDraft(profileDraftFromUser(currentUser))}
+                  >
+                    Reset
+                  </button>
+                </div>
+              </form>
             </Surface>
           </div>
         );

@@ -4,6 +4,7 @@ export type AppViewName =
   | "register"
   | "requirements"
   | "records"
+  | "profiles"
   | "users"
   | "payrolls"
   | "trash";
@@ -18,6 +19,7 @@ export const APP_VIEWS: Array<{
   { view: "register", label: "Registry" },
   { view: "requirements", label: "Requirements" },
   { view: "records", label: "Records" },
+  { view: "profiles", label: "Profiles" },
   { view: "users", label: "Users", adminOnly: true },
   { view: "payrolls", label: "Payrolls", adminOnly: true },
   { view: "trash", label: "Trash", adminOnly: true }
