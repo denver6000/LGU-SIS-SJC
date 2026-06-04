@@ -1,10 +1,9 @@
 "use client";
 
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { FormEvent, useEffect, useState } from "react";
 import { signInWithEmailAndPassword } from "firebase/auth";
-import { GraduationCap, LockKeyhole, Mail } from "lucide-react";
+import { LockKeyhole, Mail } from "lucide-react";
 import { firebaseAuth } from "../lib/firebase-client";
 import { useAuth } from "../auth-provider";
 
@@ -27,7 +26,7 @@ function loginErrorMessage(error: unknown) {
 export default function LoginPage() {
   const { refreshSession, user } = useAuth();
   const router = useRouter();
-  const [message, setMessage] = useState(user ? "You are already signed in." : "Enter your Firebase account.");
+  const [message, setMessage] = useState(user ? "You are already signed in." : "");
   const [isBusy, setIsBusy] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -110,8 +109,9 @@ export default function LoginPage() {
       <section className="login-shell" aria-labelledby="authTitle">
         <form className="login-form" onSubmit={handleSubmit}>
           <div className="login-brand">
-            <div className="login-icon" aria-hidden="true">
-              <GraduationCap size={30} />
+            <div className="login-logo-row">
+              <img src="/assets/pic_sjc_official_seal.jpg" alt="San Jose City Official Seal" />
+              <img src="/assets/logo_with_mayor_name.jpg" alt="Mayor James Lungsod Pag-asa logo" />
             </div>
             <div>
               <p>San Jose LGU</p>
@@ -161,9 +161,6 @@ export default function LoginPage() {
             <button type="submit" className="primary" disabled={isBusy}>
               {isBusy ? "Signing In..." : "Sign In"}
             </button>
-            <Link href="/">
-              Continue to App
-            </Link>
           </div>
         </form>
       </section>

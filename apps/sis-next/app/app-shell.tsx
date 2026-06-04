@@ -3226,10 +3226,10 @@ export function AppShell({
   }
 
   return (
-    <div className="workspace-shell">
+    <div className={`workspace-shell workspace-view-${activeView}`}>
       <aside className={`workspace-rail ${sidebarOpen ? "open" : ""}`}>
         <div className="rail-brand">
-          <div className="rail-mark">SJ</div>
+          <img className="rail-logo" src="/assets/pic_sjc_official_seal.jpg" alt="San Jose City Official Seal" />
           <div>
             <p>San Jose LGU</p>
             <strong>Scholarship System</strong>
@@ -3265,6 +3265,11 @@ export function AppShell({
           })}
         </nav>
 
+        <div className="rail-program" aria-label="Lungsod Pag-asa scholarship identity">
+          <img src="/assets/logo_with_mayor_name.jpg" alt="Mayor James Lungsod Pag-asa logo" />
+          <span>Educational Assistance Program</span>
+        </div>
+
         <button type="button" className="rail-signout" onClick={handleSignOut} disabled={isSigningOut}>
           <LogOut size={18} />
           <span>{isSigningOut ? "Signing Out..." : "Sign Out"}</span>
@@ -3281,6 +3286,10 @@ export function AppShell({
           <div>
             <p>{labelForView(activeView)}</p>
             <h1>{labelForView(activeView)}</h1>
+          </div>
+          <div className="workspace-header-identity" aria-hidden="true">
+            <img src="/assets/pic_sjc_official_seal.jpg" alt="" />
+            <img src="/assets/logo_with_mayor_name.jpg" alt="" />
           </div>
         </header>
 
