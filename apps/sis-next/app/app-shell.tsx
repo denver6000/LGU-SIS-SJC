@@ -30,7 +30,7 @@ import {
   deleteTrashStudent,
   getCurrentCycleConfig,
   getOptions,
-  getStudents,
+  getStudentPage,
   getTrash,
   listManagedUsers,
   moveStudentToTrash,
@@ -124,6 +124,7 @@ type RenewalRecordDraft = {
 type PayrollMetadataDraft = PayrollExportMetadata;
 type RequirementsTab = "non-payrolled" | "payrolled";
 type PayrollTab = "new" | "renewal";
+type StudentLoadState = "idle" | "loading" | "loading-more" | "ready" | "error";
 type ConfirmationRequest = {
   title: string;
   message: string;
@@ -140,6 +141,9 @@ type ValidationDialogRequest = {
 };
 
 const adminRecordStatusFilters = new Set(["renewed", "unrenewed", "payrolled", "unpayrolled"]);
+const lazyStudentViews = new Set<AppViewName>(["register", "requirements", "records"]);
+const studentBackedViews = new Set<AppViewName>(["dashboard", "register", "requirements", "records", "payrolls"]);
+const studentPageSize = 75;
 
 type PersistedShellState = {
   version: 3;
@@ -754,6 +758,23 @@ function exportStudentsCsv(students: Student[]) {
   downloadTextFile("students-export.csv", "text/csv;charset=utf-8", csv);
 }
 
+function mergeStudentRecords(current: Student[], incoming: Student[], reset = false) {
+  const byId = new Map<string, Student>();
+  const base = reset ? [] : current;
+
+  for (const student of base) {
+    byId.set(student.student_id, student);
+  }
+
+  for (const student of incoming) {
+    byId.set(student.student_id, student);
+  }
+
+  return [...byId.values()].sort((left, right) =>
+    left.student_id.localeCompare(right.student_id, undefined, { numeric: true, sensitivity: "base" })
+  );
+}
+
 function shellStateStorageKey(uid: string) {
   return `sis-next:app-shell-state:${uid}`;
 }
@@ -823,6 +844,13 @@ export function AppShell({
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [isSigningOut, setIsSigningOut] = useState(false);
   const [students, setStudents] = useState<Student[]>(initialData.students);
+  const [studentLoadState, setStudentLoadState] = useState<StudentLoadState>(() =>
+    initialData.students.length ? "ready" : "idle"
+  );
+  const [studentPageCursor, setStudentPageCursor] = useState<string | null>(null);
+  const [studentHasMore, setStudentHasMore] = useState(false);
+  const [studentLoadError, setStudentLoadError] = useState("");
+  const studentLoadRequestRef = useRef(0);
   const [trash, setTrash] = useState<Student[]>(initialData.trash);
   const [payoutRecords, setPayoutRecords] = useState<PayoutRecord[]>(initialData.payoutRecords);
   const [operationLogs, setOperationLogs] = useState<OperationLog[]>(initialData.operationLogs);
@@ -898,6 +926,7 @@ export function AppShell({
 
   useEffect(() => {
     for (const item of visibleNavItems) {
+      if (lazyStudentViews.has(item.view)) continue;
       router.prefetch(routeForView(item.view));
     }
   }, [router, visibleNavItems]);
@@ -1161,9 +1190,8 @@ export function AppShell({
   useEffect(() => {
     let cancelled = false;
 
-    async function refreshAll() {
-      const [nextStudents, nextCycle, nextOptions, nextTrash] = await Promise.all([
-        getStudents(),
+    async function refreshReferenceData() {
+      const [nextCycle, nextOptions, nextTrash] = await Promise.all([
         getCurrentCycleConfig(),
         Promise.all([
           getOptions("barangays"),
@@ -1176,7 +1204,6 @@ export function AppShell({
 
       if (cancelled) return;
 
-      setStudents(nextStudents);
       setCurrentCycle(nextCycle);
       setOptions({
         barangays: nextOptions[0],
@@ -1187,12 +1214,19 @@ export function AppShell({
       setTrash(nextTrash);
     }
 
-    refreshAll().catch(() => undefined);
+    refreshReferenceData().catch(() => undefined);
 
     return () => {
       cancelled = true;
     };
   }, [isAdmin]);
+
+  useEffect(() => {
+    if (!studentBackedViews.has(activeView)) return;
+    if (students.length || studentLoadState !== "idle") return;
+
+    loadStudentsPage({ reset: true }).catch(() => undefined);
+  }, [activeView, studentLoadState, students.length]);
 
   useEffect(() => {
     if (activeView !== "users" || !isAdmin || usersLoaded) return;
@@ -1556,9 +1590,38 @@ export function AppShell({
     return task().finally(() => setBusyKey((current) => (current === key ? null : current)));
   }
 
+  async function loadStudentsPage({ reset = false }: { reset?: boolean } = {}) {
+    if (studentLoadState === "loading" || studentLoadState === "loading-more") return;
+
+    const requestId = studentLoadRequestRef.current + 1;
+    studentLoadRequestRef.current = requestId;
+    setStudentLoadError("");
+    setStudentLoadState(reset || !students.length ? "loading" : "loading-more");
+
+    try {
+      const page = await getStudentPage({
+        cursor: reset ? null : studentPageCursor,
+        limit: studentPageSize
+      });
+
+      if (studentLoadRequestRef.current !== requestId) return;
+
+      setStudents((current) => mergeStudentRecords(current, page.students, reset));
+      setStudentPageCursor(page.nextCursor);
+      setStudentHasMore(page.hasMore);
+      setStudentLoadState("ready");
+    } catch (error) {
+      if (studentLoadRequestRef.current !== requestId) return;
+
+      setStudentLoadError(error instanceof Error ? error.message : "Unable to load students.");
+      setStudentLoadState("error");
+    }
+  }
+
   function navigate(view: AppViewName, overrides: Partial<PersistedShellState> = {}) {
     if (isAdminOnlyView(view) && !isAdmin) return;
     persistShellStateSnapshot(overrides);
+    setActiveView(view);
     setSidebarOpen(false);
     router.push(routeForView(view));
   }
@@ -2419,6 +2482,12 @@ export function AppShell({
     }
   }
 
+  const studentInitialLoadPending =
+    studentBackedViews.has(activeView) &&
+    students.length === 0 &&
+    (studentLoadState === "idle" || studentLoadState === "loading");
+  const studentPageLoading = studentLoadState === "loading" || studentLoadState === "loading-more";
+
   function renderCurrentView() {
     switch (activeView) {
       case "dashboard":
@@ -2575,43 +2644,68 @@ export function AppShell({
               onStatusChange={setStatusFilter}
               onBatchChange={setBatchFilter}
             />
-            <Surface title="Student List" subtitle={`${filteredStudents.length} active student records match the current filters.`}>
-              <DataTable
-                columns={[
-                  { key: "id", label: "ID", render: (student) => student.student_id },
-                  { key: "name", label: "Student", render: (student) => student.full_name },
-                  { key: "number", label: "Student No.", render: (student) => student.student_number || "—" },
-                  { key: "school", label: "School", render: (student) => student.school_address || "—" },
-                  { key: "course", label: "Course", render: (student) => student.school_course || "—" },
-                  { key: "batch", label: "Batch", render: (student) => student.batch || "—" },
-                  { key: "requirements", label: "Requirements", render: (student) => completionStatus(student) },
-                  ...(isAdmin
-                    ? [
-                        {
-                          key: "actions",
-                          label: "Actions",
-                          render: (student: Student) => (
-                            <div className="row-actions">
-                              <button type="button" className="action-button" onClick={() => fillStudentDraft(student)}>
-                                Edit
-                              </button>
-                              <button
-                                type="button"
-                                className="action-button danger"
-                                onClick={() => handleMoveToTrash(student)}
-                                disabled={busyKey === `trash-${student.student_id}`}
-                              >
-                                {busyKey === `trash-${student.student_id}` ? "Moving..." : "Move To Trash"}
-                              </button>
-                            </div>
-                          )
-                        }
-                      ]
-                    : [])
-                ]}
-                rows={filteredStudents}
-                getRowKey={(student) => student.student_id}
-              />
+            <Surface
+              title="Student List"
+              subtitle={
+                studentInitialLoadPending
+                  ? "Loading the first batch of active student records."
+                  : `${filteredStudents.length} loaded active student record${filteredStudents.length === 1 ? "" : "s"} match the current filters.`
+              }
+            >
+              {studentInitialLoadPending ? (
+                <StudentLoadingPanel />
+              ) : (
+                <>
+                  <DataTable
+                    columns={[
+                      { key: "id", label: "ID", render: (student) => student.student_id },
+                      { key: "name", label: "Student", render: (student) => student.full_name },
+                      { key: "number", label: "Student No.", render: (student) => student.student_number || "—" },
+                      { key: "school", label: "School", render: (student) => student.school_address || "—" },
+                      { key: "course", label: "Course", render: (student) => student.school_course || "—" },
+                      { key: "batch", label: "Batch", render: (student) => student.batch || "—" },
+                      { key: "requirements", label: "Requirements", render: (student) => completionStatus(student) },
+                      ...(isAdmin
+                        ? [
+                            {
+                              key: "actions",
+                              label: "Actions",
+                              render: (student: Student) => (
+                                <div className="row-actions">
+                                  <button type="button" className="action-button" onClick={() => fillStudentDraft(student)}>
+                                    Edit
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="action-button danger"
+                                    onClick={() => handleMoveToTrash(student)}
+                                    disabled={busyKey === `trash-${student.student_id}`}
+                                  >
+                                    {busyKey === `trash-${student.student_id}` ? "Moving..." : "Move To Trash"}
+                                  </button>
+                                </div>
+                              )
+                            }
+                          ]
+                        : [])
+                    ]}
+                    rows={filteredStudents}
+                    getRowKey={(student) => student.student_id}
+                  />
+                  <StudentLoadControls
+                    error={studentLoadError}
+                    hasMore={studentHasMore}
+                    isLoading={studentPageLoading}
+                    loadedCount={students.length}
+                    onLoadMore={() => {
+                      void loadStudentsPage();
+                    }}
+                    onRetry={() => {
+                      void loadStudentsPage({ reset: true });
+                    }}
+                  />
+                </>
+              )}
             </Surface>
           </div>
         );
@@ -2633,58 +2727,83 @@ export function AppShell({
               onStatusChange={setStatusFilter}
               onBatchChange={setBatchFilter}
             />
-            <Surface title="Student Records" subtitle={`${filteredStudents.length} records match the current filters.`}>
-              <DataTable
-                columns={[
-                  { key: "id", label: "ID", render: (student) => student.student_id },
-                  { key: "name", label: "Student", render: (student) => student.full_name },
-                  { key: "school", label: "School", render: (student) => student.school_address || "—" },
-                  { key: "course", label: "Course", render: (student) => student.school_course || "—" },
-                  { key: "batch", label: "Batch", render: (student) => student.batch || "—" },
-                  { key: "completion", label: "Requirements", render: (student) => completionStatus(student) },
-                  {
-                    key: "renewals",
-                    label: "Renewals",
-                    render: (student) => renewalHistoryCount(student)
-                  },
-                  {
-                    key: "requirements_count",
-                    label: "Ready",
-                    render: (student) => {
-                      const requirements = getStudentRequirements(student);
-                      return `${requirementCompletionCount(requirements)}/${requirementFields.length}`;
-                    }
-                  },
-                  ...(isAdmin
-                    ? [
-                        {
-                          key: "payrolls",
-                          label: "Payrolls",
-                          render: (student: Student) => {
-                            const summary = payrollSummaryByStudent.get(student.student_id);
-                            return (
-                              <div className="payroll-summary-cell">
-                                <strong>{summary?.count || 0}</strong>
-                                <span>{summary?.amount ? `PHP ${summary.amount.toLocaleString()}` : "No payroll yet"}</span>
-                              </div>
-                            );
-                          }
+            <Surface
+              title="Student Records"
+              subtitle={
+                studentInitialLoadPending
+                  ? "Loading the first batch of student records."
+                  : `${filteredStudents.length} loaded record${filteredStudents.length === 1 ? "" : "s"} match the current filters.`
+              }
+            >
+              {studentInitialLoadPending ? (
+                <StudentLoadingPanel />
+              ) : (
+                <>
+                  <DataTable
+                    columns={[
+                      { key: "id", label: "ID", render: (student) => student.student_id },
+                      { key: "name", label: "Student", render: (student) => student.full_name },
+                      { key: "school", label: "School", render: (student) => student.school_address || "—" },
+                      { key: "course", label: "Course", render: (student) => student.school_course || "—" },
+                      { key: "batch", label: "Batch", render: (student) => student.batch || "—" },
+                      { key: "completion", label: "Requirements", render: (student) => completionStatus(student) },
+                      {
+                        key: "renewals",
+                        label: "Renewals",
+                        render: (student) => renewalHistoryCount(student)
+                      },
+                      {
+                        key: "requirements_count",
+                        label: "Ready",
+                        render: (student) => {
+                          const requirements = getStudentRequirements(student);
+                          return `${requirementCompletionCount(requirements)}/${requirementFields.length}`;
                         }
-                      ]
-                    : []),
-                  {
-                    key: "actions",
-                    label: "Actions",
-                    render: (student) => (
-                      <button type="button" className="action-button" onClick={() => setActionsStudentId(student.student_id)}>
-                        Actions
-                      </button>
-                    )
-                  }
-                ]}
-                rows={filteredStudents}
-                getRowKey={(student) => student.student_id}
-              />
+                      },
+                      ...(isAdmin
+                        ? [
+                            {
+                              key: "payrolls",
+                              label: "Payrolls",
+                              render: (student: Student) => {
+                                const summary = payrollSummaryByStudent.get(student.student_id);
+                                return (
+                                  <div className="payroll-summary-cell">
+                                    <strong>{summary?.count || 0}</strong>
+                                    <span>{summary?.amount ? `PHP ${summary.amount.toLocaleString()}` : "No payroll yet"}</span>
+                                  </div>
+                                );
+                              }
+                            }
+                          ]
+                        : []),
+                      {
+                        key: "actions",
+                        label: "Actions",
+                        render: (student) => (
+                          <button type="button" className="action-button" onClick={() => setActionsStudentId(student.student_id)}>
+                            Actions
+                          </button>
+                        )
+                      }
+                    ]}
+                    rows={filteredStudents}
+                    getRowKey={(student) => student.student_id}
+                  />
+                  <StudentLoadControls
+                    error={studentLoadError}
+                    hasMore={studentHasMore}
+                    isLoading={studentPageLoading}
+                    loadedCount={students.length}
+                    onLoadMore={() => {
+                      void loadStudentsPage();
+                    }}
+                    onRetry={() => {
+                      void loadStudentsPage({ reset: true });
+                    }}
+                  />
+                </>
+              )}
             </Surface>
             {isAdmin ? (
               <Surface
@@ -2851,9 +2970,11 @@ export function AppShell({
             <Surface
               title="Requirement Management"
               subtitle={
-                isAdmin
-                  ? `${requirementRows.length} ${requirementsTab === "payrolled" ? "payrolled" : "non-payrolled"} student${requirementRows.length === 1 ? "" : "s"} for ${semesterLabel(requirementsCycle)}.`
-                  : `${requirementRows.length} student${requirementRows.length === 1 ? "" : "s"} for ${semesterLabel(requirementsCycle)}.`
+                studentInitialLoadPending
+                  ? `Loading students for ${semesterLabel(requirementsCycle)}.`
+                  : isAdmin
+                    ? `${requirementRows.length} loaded ${requirementsTab === "payrolled" ? "payrolled" : "non-payrolled"} student${requirementRows.length === 1 ? "" : "s"} for ${semesterLabel(requirementsCycle)}.`
+                    : `${requirementRows.length} loaded student${requirementRows.length === 1 ? "" : "s"} for ${semesterLabel(requirementsCycle)}.`
               }
               actions={
                 isAdmin ? (
@@ -2928,55 +3049,73 @@ export function AppShell({
                   </button>
                 </div>
               </div>
-              <DataTable
-                columns={[
-                  { key: "id", label: "ID", render: (student) => student.student_id },
-                  { key: "name", label: "Student", render: (student) => student.full_name },
-                  { key: "school", label: "School", render: (student) => student.school_address || "—" },
-                  { key: "batch", label: "Batch", render: (student) => student.batch || "—" },
-                  {
-                    key: "initial_payout_requirements",
-                    label: "Initial Requirements",
-                    render: (student) => {
-                      const requirements = getInitialPayoutRequirements(student);
-                      return `${requirementCompletionCount(requirements)}/${requirementFields.length}`;
-                    }
-                  },
-                  {
-                    key: "renewal_requirements",
-                    label: "Renewal",
-                    render: (student) => {
-                      const record = getSemesterRecordForCycle(student, requirementsCycle);
-                      return record
-                        ? `${renewalRequirementCompletionCount(getSemesterRenewalRequirements(record))}/${renewalRequirementFields.length}`
-                        : `0/${renewalRequirementFields.length}`;
-                    }
-                  },
-                  ...(isAdmin
-                    ? [
-                        {
-                          key: "status",
-                          label: "Payroll Qualification",
-                          render: (student: Student) => {
-                            const status = getSemesterPayrollStatus(student, requirementsCycle);
-                            return <FlagPill active={status === "qualified" || status === "payrolled"} label={qualificationLabel(student, requirementsCycle)} />;
-                          }
+              {studentInitialLoadPending ? (
+                <StudentLoadingPanel detail="Fetching the first batch for requirement management." />
+              ) : (
+                <>
+                  <DataTable
+                    columns={[
+                      { key: "id", label: "ID", render: (student) => student.student_id },
+                      { key: "name", label: "Student", render: (student) => student.full_name },
+                      { key: "school", label: "School", render: (student) => student.school_address || "—" },
+                      { key: "batch", label: "Batch", render: (student) => student.batch || "—" },
+                      {
+                        key: "initial_payout_requirements",
+                        label: "Initial Requirements",
+                        render: (student) => {
+                          const requirements = getInitialPayoutRequirements(student);
+                          return `${requirementCompletionCount(requirements)}/${requirementFields.length}`;
                         }
-                      ]
-                    : []),
-                  {
-                    key: "actions",
-                    label: "Actions",
-                    render: (student) => (
-                      <button type="button" className="action-button" onClick={() => openRenewalRecord(student, requirementsCycle)}>
-                        Manage Requirements
-                      </button>
-                    )
-                  }
-                ]}
-                rows={requirementRows}
-                getRowKey={(student) => student.student_id}
-              />
+                      },
+                      {
+                        key: "renewal_requirements",
+                        label: "Renewal",
+                        render: (student) => {
+                          const record = getSemesterRecordForCycle(student, requirementsCycle);
+                          return record
+                            ? `${renewalRequirementCompletionCount(getSemesterRenewalRequirements(record))}/${renewalRequirementFields.length}`
+                            : `0/${renewalRequirementFields.length}`;
+                        }
+                      },
+                      ...(isAdmin
+                        ? [
+                            {
+                              key: "status",
+                              label: "Payroll Qualification",
+                              render: (student: Student) => {
+                                const status = getSemesterPayrollStatus(student, requirementsCycle);
+                                return <FlagPill active={status === "qualified" || status === "payrolled"} label={qualificationLabel(student, requirementsCycle)} />;
+                              }
+                            }
+                          ]
+                        : []),
+                      {
+                        key: "actions",
+                        label: "Actions",
+                        render: (student) => (
+                          <button type="button" className="action-button" onClick={() => openRenewalRecord(student, requirementsCycle)}>
+                            Manage Requirements
+                          </button>
+                        )
+                      }
+                    ]}
+                    rows={requirementRows}
+                    getRowKey={(student) => student.student_id}
+                  />
+                  <StudentLoadControls
+                    error={studentLoadError}
+                    hasMore={studentHasMore}
+                    isLoading={studentPageLoading}
+                    loadedCount={students.length}
+                    onLoadMore={() => {
+                      void loadStudentsPage();
+                    }}
+                    onRetry={() => {
+                      void loadStudentsPage({ reset: true });
+                    }}
+                  />
+                </>
+              )}
             </Surface>
           </div>
         );
@@ -4332,6 +4471,64 @@ function DataTable<T>({
           )}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+function StudentLoadingPanel({ detail = "Fetching the first batch of student records." }: { detail?: string }) {
+  return (
+    <div className="student-loading-panel" role="status" aria-live="polite">
+      <div className="student-loading-spinner" aria-hidden="true" />
+      <div>
+        <strong>Loading students</strong>
+        <span>{detail}</span>
+      </div>
+    </div>
+  );
+}
+
+function StudentLoadControls({
+  error,
+  hasMore,
+  isLoading,
+  loadedCount,
+  onLoadMore,
+  onRetry
+}: {
+  error: string;
+  hasMore: boolean;
+  isLoading: boolean;
+  loadedCount: number;
+  onLoadMore: () => void;
+  onRetry: () => void;
+}) {
+  if (error && loadedCount === 0) {
+    return (
+      <div className="student-load-footer error">
+        <span>{error}</span>
+        <button type="button" className="secondary-button" onClick={onRetry}>
+          Retry
+        </button>
+      </div>
+    );
+  }
+
+  if (!hasMore && !error) return null;
+
+  return (
+    <div className={`student-load-footer ${error ? "error" : ""}`}>
+      <span>
+        {error
+          ? error
+          : hasMore
+            ? `${loadedCount} student${loadedCount === 1 ? "" : "s"} loaded.`
+            : "All loaded students are visible."}
+      </span>
+      {hasMore ? (
+        <button type="button" className="secondary-button" onClick={onLoadMore} disabled={isLoading}>
+          {isLoading ? "Loading..." : "Load More Students"}
+        </button>
+      ) : null}
     </div>
   );
 }

@@ -1,5 +1,6 @@
 import "server-only";
 
+import { FieldPath, type Query } from "firebase-admin/firestore";
 import { REQUIREMENT_KEYS, RENEWAL_REQUIREMENT_KEYS } from "../../shared/student";
 import type {
   StudentRequirementKey,
@@ -19,6 +20,8 @@ import { isAdminRole } from "../../shared/roles";
 import type { SessionUser } from "../../shared/user";
 
 const db = getAdminDb();
+const DEFAULT_STUDENT_PAGE_SIZE = 75;
+const MAX_STUDENT_PAGE_SIZE = 250;
 
 function normalizeBoolean(value: unknown) {
   return value === true;
@@ -408,6 +411,43 @@ export function normalizeStudentRecord(
 export async function listStudents() {
   const snapshot = await db.collection(COLLECTIONS.students).get();
   return snapshot.docs.map((docSnap) => normalizeStudentRecord(docSnap.data() as Student, { student_id: docSnap.id }));
+}
+
+function normalizedPageLimit(value: unknown) {
+  const limit = Number(value || DEFAULT_STUDENT_PAGE_SIZE);
+  if (!Number.isFinite(limit) || limit <= 0) return DEFAULT_STUDENT_PAGE_SIZE;
+  return Math.min(Math.floor(limit), MAX_STUDENT_PAGE_SIZE);
+}
+
+export async function listStudentsPage({
+  cursor,
+  limit
+}: {
+  cursor?: string | null;
+  limit?: number;
+} = {}) {
+  const pageLimit = normalizedPageLimit(limit);
+  let query: Query = db
+    .collection(COLLECTIONS.students)
+    .orderBy(FieldPath.documentId())
+    .limit(pageLimit);
+
+  if (cursor) {
+    query = query.startAfter(cursor);
+  }
+
+  const snapshot = await query.get();
+  const students = snapshot.docs.map((docSnap) =>
+    normalizeStudentRecord(docSnap.data() as Student, { student_id: docSnap.id })
+  );
+  const lastDocument = snapshot.docs[snapshot.docs.length - 1];
+
+  return {
+    students,
+    nextCursor: snapshot.size === pageLimit && lastDocument ? lastDocument.id : null,
+    hasMore: snapshot.size === pageLimit,
+    limit: pageLimit
+  };
 }
 
 export async function listTrash() {

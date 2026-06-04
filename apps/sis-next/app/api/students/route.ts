@@ -1,11 +1,23 @@
-import { createStudent, listStudents } from "../../lib/server/repositories/students";
+import { createStudent, listStudents, listStudentsPage } from "../../lib/server/repositories/students";
 import { jsonError } from "../../lib/shared/http";
 import { requireSessionUserForApi } from "../../lib/server/auth";
 import type { StudentInput } from "../../lib/shared/student";
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
     await requireSessionUserForApi();
+    const url = new URL(request.url);
+    const limit = url.searchParams.get("limit");
+    const cursor = url.searchParams.get("cursor");
+
+    if (limit || cursor) {
+      const page = await listStudentsPage({
+        limit: limit ? Number(limit) : undefined,
+        cursor
+      });
+      return Response.json(page);
+    }
+
     const students = await listStudents();
     return Response.json({ students });
   } catch (error) {

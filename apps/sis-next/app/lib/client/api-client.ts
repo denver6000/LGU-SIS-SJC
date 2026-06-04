@@ -45,6 +45,13 @@ export type AppInitialData = {
   };
 };
 
+export type StudentPage = {
+  students: Student[];
+  nextCursor: string | null;
+  hasMore: boolean;
+  limit: number;
+};
+
 export function getCurrentCycleConfig() {
   return request<{ currentCycle: CurrentCycleConfig }>("/api/system-config/current-cycle").then((data) => data.currentCycle);
 }
@@ -62,6 +69,20 @@ export function saveCurrentCycleConfig(input: {
 
 export function getStudents() {
   return request<{ students: Student[] }>("/api/students").then((data) => data.students);
+}
+
+export function getStudentPage({
+  cursor,
+  limit = 75
+}: {
+  cursor?: string | null;
+  limit?: number;
+} = {}) {
+  const params = new URLSearchParams();
+  params.set("limit", String(limit));
+  if (cursor) params.set("cursor", cursor);
+
+  return request<StudentPage>(`/api/students?${params.toString()}`);
 }
 
 export function createStudent(student: StudentInput) {
