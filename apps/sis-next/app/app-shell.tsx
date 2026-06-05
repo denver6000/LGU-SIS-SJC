@@ -15,7 +15,7 @@ import {
   UserRoundPlus,
   X
 } from "lucide-react";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { updateEmail, updatePassword, updateProfile } from "firebase/auth";
 import { useAuth } from "./auth-provider";
@@ -830,7 +830,6 @@ export function AppShell({
   initialView: AppViewName;
 }) {
   const { user, refreshSession, signOutUser } = useAuth();
-  const router = useRouter();
   const pathname = usePathname();
   const currentUser = user || initialData.user;
   const isAdmin = isAdminUser(currentUser);
@@ -923,13 +922,6 @@ export function AppShell({
       confirmPassword: current.confirmPassword
     }));
   }, [currentUser.email, currentUser.name, currentUser.uid]);
-
-  useEffect(() => {
-    for (const item of visibleNavItems) {
-      if (lazyStudentViews.has(item.view)) continue;
-      router.prefetch(routeForView(item.view));
-    }
-  }, [router, visibleNavItems]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -1249,9 +1241,9 @@ export function AppShell({
 
   useEffect(() => {
     if (isAdminOnlyView(activeView) && !isAdmin) {
-      router.replace(routeForView("dashboard"));
+      window.location.replace(routeForView("dashboard"));
     }
-  }, [activeView, isAdmin, router]);
+  }, [activeView, isAdmin]);
 
   const batchOptions = useMemo(() => {
     const batches = new Set(options.batches.map((item) => item.name).filter(Boolean));
@@ -1623,7 +1615,7 @@ export function AppShell({
     persistShellStateSnapshot(overrides);
     setActiveView(view);
     setSidebarOpen(false);
-    router.push(routeForView(view));
+    window.location.assign(routeForView(view));
   }
 
   async function handleSignOut() {

@@ -1,6 +1,5 @@
 "use client";
 
-import { useRouter } from "next/navigation";
 import { FormEvent, useEffect, useState } from "react";
 import { sendPasswordResetEmail, signInWithEmailAndPassword } from "firebase/auth";
 import { LockKeyhole, Mail } from "lucide-react";
@@ -25,7 +24,6 @@ function loginErrorMessage(error: unknown) {
 
 export default function LoginPage() {
   const { refreshSession, user } = useAuth();
-  const router = useRouter();
   const [message, setMessage] = useState(user ? "You are already signed in." : "");
   const [isBusy, setIsBusy] = useState(false);
   const [isResetBusy, setIsResetBusy] = useState(false);
@@ -96,8 +94,7 @@ export default function LoginPage() {
       setEmail("");
       setPassword("");
       window.localStorage.removeItem(LOGIN_DRAFT_STORAGE_KEY);
-      router.push("/");
-      router.refresh();
+      window.location.assign("/");
     } catch (error) {
       setMessage(loginErrorMessage(error));
     } finally {
