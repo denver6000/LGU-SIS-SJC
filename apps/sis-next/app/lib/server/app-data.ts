@@ -19,6 +19,11 @@ import { getServerAppFirestore } from "./firebase-server-app";
 import { isDevAppEnv } from "../shared/app-env";
 import { isAdminRole } from "../shared/roles";
 
+type AppInitialDataOptions = {
+  deferStudents?: boolean;
+  deferPayoutRecords?: boolean;
+};
+
 async function listCollectionWithServerApp<T>(collectionName: string, authIdToken: string | null) {
   if (!authIdToken) return null;
 
@@ -47,21 +52,23 @@ async function listCollectionWithServerApp<T>(collectionName: string, authIdToke
   }
 }
 
-export async function getAppInitialData(user: SessionUser) {
+export async function getAppInitialData(user: SessionUser, options: AppInitialDataOptions = {}) {
   const isAdmin = isAdminRole(user.claims.role) || user.claims.admin === true;
+  const shouldLoadStudents = !options.deferStudents;
+  const shouldLoadPayoutRecords = isAdmin && !options.deferPayoutRecords;
   const shouldUseServerAppReads = !isDevAppEnv() && !isAdmin;
   const authIdToken = shouldUseServerAppReads ? await getAuthIdTokenFromHeaders() : null;
   const [serverAppStudents, serverAppPayoutRecords, serverAppOperationLogs] = await Promise.all([
-    listCollectionWithServerApp<Student>(COLLECTIONS.students, authIdToken),
-    isAdmin ? listCollectionWithServerApp<PayoutRecord>(COLLECTIONS.payoutRecords, authIdToken) : Promise.resolve(null),
+    shouldLoadStudents ? listCollectionWithServerApp<Student>(COLLECTIONS.students, authIdToken) : Promise.resolve(null),
+    shouldLoadPayoutRecords ? listCollectionWithServerApp<PayoutRecord>(COLLECTIONS.payoutRecords, authIdToken) : Promise.resolve(null),
     listCollectionWithServerApp<OperationLog>(COLLECTIONS.operationLogs, authIdToken)
   ]);
 
   const [students, trash, payoutRecords, operationLogs, currentCycle, barangays, schools, courses, batches, schoolCourses] =
     await Promise.all([
-      serverAppStudents ?? listStudents(),
+      shouldLoadStudents ? serverAppStudents ?? listStudents() : Promise.resolve([]),
       isAdmin ? listTrash() : Promise.resolve([]),
-      isAdmin ? serverAppPayoutRecords ?? listPayoutRecords() : Promise.resolve([]),
+      shouldLoadPayoutRecords ? serverAppPayoutRecords ?? listPayoutRecords() : Promise.resolve([]),
       isAdmin
         ? serverAppOperationLogs ?? listOperationLogs()
         : (serverAppOperationLogs ?? await listOperationLogs()).filter((record) => record.entity !== "payroll"),

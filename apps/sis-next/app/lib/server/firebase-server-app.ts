@@ -4,6 +4,7 @@ import { initializeServerApp, type FirebaseServerAppSettings } from "firebase/ap
 import { connectFirestoreEmulator, getFirestore } from "firebase/firestore/lite";
 import {
   FIREBASE_EMULATOR_HOST,
+  FIRESTORE_DATABASE_ID,
   FIRESTORE_EMULATOR_PORT,
   isDevAppEnv
 } from "../shared/app-env";
@@ -32,7 +33,11 @@ export function createFirebaseServerApp(settings: FirebaseServerAppSettings) {
 const connectedFirestoreInstances = new WeakSet<object>();
 
 export function getServerAppFirestore(settings: FirebaseServerAppSettings) {
-  const firestore = getFirestore(createFirebaseServerApp(settings));
+  const app = createFirebaseServerApp(settings);
+  const firestore =
+    FIRESTORE_DATABASE_ID === "(default)"
+      ? getFirestore(app)
+      : getFirestore(app, FIRESTORE_DATABASE_ID);
 
   if (isDevAppEnv() && !connectedFirestoreInstances.has(firestore as object)) {
     connectFirestoreEmulator(

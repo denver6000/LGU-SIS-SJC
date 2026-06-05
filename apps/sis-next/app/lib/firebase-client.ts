@@ -6,6 +6,7 @@ import { connectFirestoreEmulator, getFirestore } from "firebase/firestore";
 import {
   FIREBASE_AUTH_EMULATOR_PORT,
   FIREBASE_EMULATOR_HOST,
+  FIRESTORE_DATABASE_ID,
   FIRESTORE_EMULATOR_PORT,
   isDevAppEnv
 } from "./shared/app-env";
@@ -29,7 +30,10 @@ const firebaseConfig = {
 
 export const firebaseApp = getApps().length ? getApp() : initializeApp(firebaseConfig);
 export const firebaseAuth = getAuth(firebaseApp);
-export const firebaseDb = getFirestore(firebaseApp);
+export const firebaseDb =
+  FIRESTORE_DATABASE_ID === "(default)"
+    ? getFirestore(firebaseApp)
+    : getFirestore(firebaseApp, FIRESTORE_DATABASE_ID);
 
 const emulatorState = globalThis as typeof globalThis & {
   __sisFirebaseEmulators?: {

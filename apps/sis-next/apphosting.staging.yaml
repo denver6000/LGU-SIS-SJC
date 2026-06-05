@@ -1,29 +1,21 @@
-runConfig:
-  minInstances: 0
-  maxInstances: 10
-  concurrency: 80
-  cpu: 1
-  memoryMiB: 512
-scripts:
-  runCommand: node .next/standalone/server.js
 env:
   - variable: APP_ENV
-    value: "production"
+    value: "staging"
     availability:
       - BUILD
       - RUNTIME
   - variable: NEXT_PUBLIC_APP_ENV
-    value: "production"
+    value: "staging"
     availability:
       - BUILD
       - RUNTIME
   - variable: FIRESTORE_DATABASE_ID
-    value: "(default)"
+    value: "staging"
     availability:
       - BUILD
       - RUNTIME
   - variable: NEXT_PUBLIC_FIRESTORE_DATABASE_ID
-    value: "(default)"
+    value: "staging"
     availability:
       - BUILD
       - RUNTIME
@@ -53,12 +45,12 @@ env:
       - BUILD
       - RUNTIME
   - variable: NEXT_PUBLIC_FIREBASE_APP_ID
-    value: "1:69562690564:web:05b7a3f7f93883838b5951"
+    value: "1:69562690564:web:6a4c6fdd42371a8e8b5951"
     availability:
       - BUILD
       - RUNTIME
   - variable: NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID
-    value: "G-JQ9GNYEDL6"
+    value: "G-SJ3HWPGRNR"
     availability:
       - BUILD
       - RUNTIME

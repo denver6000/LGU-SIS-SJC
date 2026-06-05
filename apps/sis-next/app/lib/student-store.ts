@@ -12,6 +12,7 @@ export {
   getOperationLogs,
   getOptions,
   getSchoolCourses,
+  getStudentPage,
   getStudents,
   getTrash,
   importBatchWorkbookOptions,
