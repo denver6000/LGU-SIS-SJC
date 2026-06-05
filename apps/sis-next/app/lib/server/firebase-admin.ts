@@ -8,6 +8,7 @@ import path from "node:path";
 import {
   FIREBASE_AUTH_EMULATOR_PORT,
   FIREBASE_EMULATOR_HOST,
+  FIRESTORE_DATABASE_ID,
   FIRESTORE_EMULATOR_PORT,
   isDevAppEnv
 } from "../shared/app-env";
@@ -77,5 +78,8 @@ export function getAdminAuth() {
 }
 
 export function getAdminDb() {
-  return getFirestore(getAdminApp());
+  const app = getAdminApp();
+  return FIRESTORE_DATABASE_ID === "(default)"
+    ? getFirestore(app)
+    : getFirestore(app, FIRESTORE_DATABASE_ID);
 }
