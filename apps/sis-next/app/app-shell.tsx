@@ -16,6 +16,7 @@ import {
   X
 } from "lucide-react";
 import { usePathname } from "next/navigation";
+import { useWindowVirtualizer } from "@tanstack/react-virtual";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { updateEmail, updatePassword, updateProfile } from "firebase/auth";
 import { useAuth } from "./auth-provider";
@@ -144,6 +145,7 @@ const adminRecordStatusFilters = new Set(["renewed", "unrenewed", "payrolled", "
 const lazyStudentViews = new Set<AppViewName>(["register", "requirements", "records"]);
 const studentBackedViews = new Set<AppViewName>(["dashboard", "register", "requirements", "records", "payrolls"]);
 const studentPageSize = 75;
+const dataTableEstimatedRowSize = 64;
 
 type PersistedShellState = {
   version: 3;
@@ -4435,9 +4437,49 @@ function DataTable<T>({
   rows: T[];
   getRowKey: (row: T) => string;
 }) {
+  const tableRef = useRef<HTMLTableElement | null>(null);
+  const [tableScrollMargin, setTableScrollMargin] = useState(0);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    let frameId = 0;
+    const updateTableOffset = () => {
+      window.cancelAnimationFrame(frameId);
+      frameId = window.requestAnimationFrame(() => {
+        const table = tableRef.current;
+        setTableScrollMargin(table ? table.getBoundingClientRect().top + window.scrollY : 0);
+      });
+    };
+
+    updateTableOffset();
+    window.addEventListener("resize", updateTableOffset);
+
+    return () => {
+      window.cancelAnimationFrame(frameId);
+      window.removeEventListener("resize", updateTableOffset);
+    };
+  }, [rows.length, columns.length]);
+
+  const rowVirtualizer = useWindowVirtualizer<HTMLTableRowElement>({
+    count: rows.length,
+    estimateSize: () => dataTableEstimatedRowSize,
+    getItemKey: (index) => {
+      const row = rows[index];
+      return row ? getRowKey(row) : index;
+    },
+    overscan: 10,
+    scrollMargin: tableScrollMargin
+  });
+  const virtualRows = rowVirtualizer.getVirtualItems();
+  const firstVirtualRow = virtualRows[0];
+  const lastVirtualRow = virtualRows[virtualRows.length - 1];
+  const paddingTop = firstVirtualRow?.start ?? 0;
+  const paddingBottom = lastVirtualRow ? Math.max(rowVirtualizer.getTotalSize() - lastVirtualRow.end, 0) : rowVirtualizer.getTotalSize();
+
   return (
     <div className="table-shell">
-      <table className="data-table">
+      <table ref={tableRef} className="data-table">
         <thead>
           <tr>
             {columns.map((column) => (
@@ -4447,13 +4489,34 @@ function DataTable<T>({
         </thead>
         <tbody>
           {rows.length ? (
-            rows.map((row) => (
-              <tr key={getRowKey(row)}>
-                {columns.map((column) => (
-                  <td key={column.key}>{column.render(row)}</td>
-                ))}
-              </tr>
-            ))
+            <>
+              {paddingTop > 0 ? (
+                <tr className="virtual-spacer-row" aria-hidden="true">
+                  <td colSpan={columns.length} style={{ height: paddingTop }} />
+                </tr>
+              ) : null}
+              {virtualRows.map((virtualRow) => {
+                const row = rows[virtualRow.index];
+                if (!row) return null;
+
+                return (
+                  <tr
+                    key={virtualRow.key}
+                    ref={rowVirtualizer.measureElement}
+                    data-index={virtualRow.index}
+                  >
+                    {columns.map((column) => (
+                      <td key={column.key}>{column.render(row)}</td>
+                    ))}
+                  </tr>
+                );
+              })}
+              {paddingBottom > 0 ? (
+                <tr className="virtual-spacer-row" aria-hidden="true">
+                  <td colSpan={columns.length} style={{ height: paddingBottom }} />
+                </tr>
+              ) : null}
+            </>
           ) : (
             <tr>
               <td colSpan={columns.length}>

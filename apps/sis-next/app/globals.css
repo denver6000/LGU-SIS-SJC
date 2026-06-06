@@ -1508,6 +1508,13 @@ table {
   background: #fbfcfe;
 }
 
+.data-table tbody tr.virtual-spacer-row td,
+.data-table tbody tr.virtual-spacer-row:hover td {
+  padding: 0;
+  border-bottom: 0;
+  background: transparent;
+}
+
 .empty-state {
   min-height: 200px;
   display: grid;
