@@ -1471,7 +1471,9 @@ table {
 
 .table-shell {
   width: 100%;
-  overflow-x: auto;
+  max-height: calc(44px + (64px * 10));
+  overflow: auto;
+  overscroll-behavior: contain;
   border: 1px solid var(--line);
   background: #ffffff;
 }

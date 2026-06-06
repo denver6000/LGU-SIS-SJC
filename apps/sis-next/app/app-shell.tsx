@@ -16,7 +16,7 @@ import {
   X
 } from "lucide-react";
 import { usePathname } from "next/navigation";
-import { useWindowVirtualizer } from "@tanstack/react-virtual";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { updateEmail, updatePassword, updateProfile } from "firebase/auth";
 import { useAuth } from "./auth-provider";
@@ -4437,52 +4437,28 @@ function DataTable<T>({
   rows: T[];
   getRowKey: (row: T) => string;
 }) {
-  const tableRef = useRef<HTMLTableElement | null>(null);
-  const [tableScrollMargin, setTableScrollMargin] = useState(0);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-
-    let frameId = 0;
-    const updateTableOffset = () => {
-      window.cancelAnimationFrame(frameId);
-      frameId = window.requestAnimationFrame(() => {
-        const table = tableRef.current;
-        setTableScrollMargin(table ? table.getBoundingClientRect().top + window.scrollY : 0);
-      });
-    };
-
-    updateTableOffset();
-    window.addEventListener("resize", updateTableOffset);
-
-    return () => {
-      window.cancelAnimationFrame(frameId);
-      window.removeEventListener("resize", updateTableOffset);
-    };
-  }, [rows.length, columns.length]);
-
-  const rowVirtualizer = useWindowVirtualizer<HTMLTableRowElement>({
+  const tableShellRef = useRef<HTMLDivElement | null>(null);
+  const rowVirtualizer = useVirtualizer<HTMLDivElement, HTMLTableRowElement>({
     count: rows.length,
     estimateSize: () => dataTableEstimatedRowSize,
+    getScrollElement: () => tableShellRef.current,
     getItemKey: (index) => {
       const row = rows[index];
       return row ? getRowKey(row) : index;
     },
-    overscan: 10,
-    scrollMargin: tableScrollMargin
+    overscan: 8
   });
   const virtualRows = rowVirtualizer.getVirtualItems();
   const firstVirtualRow = virtualRows[0];
   const lastVirtualRow = virtualRows[virtualRows.length - 1];
-  const scrollMargin = rowVirtualizer.options.scrollMargin;
-  const paddingTop = firstVirtualRow ? Math.max(firstVirtualRow.start - scrollMargin, 0) : 0;
+  const paddingTop = firstVirtualRow?.start ?? 0;
   const paddingBottom = lastVirtualRow
-    ? Math.max(rowVirtualizer.getTotalSize() - (lastVirtualRow.end - scrollMargin), 0)
+    ? Math.max(rowVirtualizer.getTotalSize() - lastVirtualRow.end, 0)
     : rowVirtualizer.getTotalSize();
 
   return (
-    <div className="table-shell">
-      <table ref={tableRef} className="data-table">
+    <div ref={tableShellRef} className="table-shell">
+      <table className="data-table">
         <thead>
           <tr>
             {columns.map((column) => (
