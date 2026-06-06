@@ -4474,8 +4474,11 @@ function DataTable<T>({
   const virtualRows = rowVirtualizer.getVirtualItems();
   const firstVirtualRow = virtualRows[0];
   const lastVirtualRow = virtualRows[virtualRows.length - 1];
-  const paddingTop = firstVirtualRow?.start ?? 0;
-  const paddingBottom = lastVirtualRow ? Math.max(rowVirtualizer.getTotalSize() - lastVirtualRow.end, 0) : rowVirtualizer.getTotalSize();
+  const scrollMargin = rowVirtualizer.options.scrollMargin;
+  const paddingTop = firstVirtualRow ? Math.max(firstVirtualRow.start - scrollMargin, 0) : 0;
+  const paddingBottom = lastVirtualRow
+    ? Math.max(rowVirtualizer.getTotalSize() - (lastVirtualRow.end - scrollMargin), 0)
+    : rowVirtualizer.getTotalSize();
 
   return (
     <div className="table-shell">
