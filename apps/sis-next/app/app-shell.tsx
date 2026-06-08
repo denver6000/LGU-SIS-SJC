@@ -2685,15 +2685,16 @@ export function AppShell({
                     ]}
                     rows={filteredStudents}
                     getRowKey={(student) => student.student_id}
+                    endReachedEnabled={studentHasMore && !studentPageLoading}
+                    onEndReached={() => {
+                      void loadStudentsPage();
+                    }}
                   />
                   <StudentLoadControls
                     error={studentLoadError}
                     hasMore={studentHasMore}
                     isLoading={studentPageLoading}
                     loadedCount={students.length}
-                    onLoadMore={() => {
-                      void loadStudentsPage();
-                    }}
                     onRetry={() => {
                       void loadStudentsPage({ reset: true });
                     }}
@@ -2783,15 +2784,16 @@ export function AppShell({
                     ]}
                     rows={filteredStudents}
                     getRowKey={(student) => student.student_id}
+                    endReachedEnabled={studentHasMore && !studentPageLoading}
+                    onEndReached={() => {
+                      void loadStudentsPage();
+                    }}
                   />
                   <StudentLoadControls
                     error={studentLoadError}
                     hasMore={studentHasMore}
                     isLoading={studentPageLoading}
                     loadedCount={students.length}
-                    onLoadMore={() => {
-                      void loadStudentsPage();
-                    }}
                     onRetry={() => {
                       void loadStudentsPage({ reset: true });
                     }}
@@ -3095,15 +3097,16 @@ export function AppShell({
                     ]}
                     rows={requirementRows}
                     getRowKey={(student) => student.student_id}
+                    endReachedEnabled={studentHasMore && !studentPageLoading}
+                    onEndReached={() => {
+                      void loadStudentsPage();
+                    }}
                   />
                   <StudentLoadControls
                     error={studentLoadError}
                     hasMore={studentHasMore}
                     isLoading={studentPageLoading}
                     loadedCount={students.length}
-                    onLoadMore={() => {
-                      void loadStudentsPage();
-                    }}
                     onRetry={() => {
                       void loadStudentsPage({ reset: true });
                     }}
@@ -4427,7 +4430,9 @@ function OptionSurface({
 function DataTable<T>({
   columns,
   rows,
-  getRowKey
+  getRowKey,
+  endReachedEnabled = false,
+  onEndReached
 }: {
   columns: Array<{
     key: string;
@@ -4436,8 +4441,12 @@ function DataTable<T>({
   }>;
   rows: T[];
   getRowKey: (row: T) => string;
+  endReachedEnabled?: boolean;
+  onEndReached?: () => void;
 }) {
   const tableShellRef = useRef<HTMLDivElement | null>(null);
+  const endReachedRef = useRef(onEndReached);
+  const endReachedPendingRef = useRef(false);
   const rowVirtualizer = useVirtualizer<HTMLDivElement, HTMLTableRowElement>({
     count: rows.length,
     estimateSize: () => dataTableEstimatedRowSize,
@@ -4456,8 +4465,33 @@ function DataTable<T>({
     ? Math.max(rowVirtualizer.getTotalSize() - lastVirtualRow.end, 0)
     : rowVirtualizer.getTotalSize();
 
+  useEffect(() => {
+    endReachedRef.current = onEndReached;
+  }, [onEndReached]);
+
+  useEffect(() => {
+    endReachedPendingRef.current = false;
+  }, [endReachedEnabled, rows.length]);
+
+  function handleTableScroll(event: React.UIEvent<HTMLDivElement>) {
+    if (!endReachedEnabled) return;
+
+    const target = event.currentTarget;
+    const remainingScroll = target.scrollHeight - target.scrollTop - target.clientHeight;
+
+    if (remainingScroll > dataTableEstimatedRowSize * 2) {
+      endReachedPendingRef.current = false;
+      return;
+    }
+
+    if (endReachedPendingRef.current) return;
+
+    endReachedPendingRef.current = true;
+    endReachedRef.current?.();
+  }
+
   return (
-    <div ref={tableShellRef} className="table-shell">
+    <div ref={tableShellRef} className="table-shell" onScroll={handleTableScroll}>
       <table className="data-table">
         <thead>
           <tr>
@@ -4526,14 +4560,12 @@ function StudentLoadControls({
   hasMore,
   isLoading,
   loadedCount,
-  onLoadMore,
   onRetry
 }: {
   error: string;
   hasMore: boolean;
   isLoading: boolean;
   loadedCount: number;
-  onLoadMore: () => void;
   onRetry: () => void;
 }) {
   if (error && loadedCount === 0) {
@@ -4555,14 +4587,11 @@ function StudentLoadControls({
         {error
           ? error
           : hasMore
-            ? `${loadedCount} student${loadedCount === 1 ? "" : "s"} loaded.`
+            ? isLoading
+              ? "Loading more students..."
+              : `${loadedCount} student${loadedCount === 1 ? "" : "s"} loaded.`
             : "All loaded students are visible."}
       </span>
-      {hasMore ? (
-        <button type="button" className="secondary-button" onClick={onLoadMore} disabled={isLoading}>
-          {isLoading ? "Loading..." : "Load More Students"}
-        </button>
-      ) : null}
     </div>
   );
 }
