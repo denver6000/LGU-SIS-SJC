@@ -19,7 +19,9 @@
     "emu:requirements": "node scripts/emulator-suite.mjs requirements",
     "emu:auth-users": "node scripts/emulator-suite.mjs auth-users",
     "emu:logs": "node scripts/emulator-suite.mjs logs",
-    "prod:students:initial-payout": "node scripts/prod-mark-students-initial-payout.mjs"
+    "prod:students:initial-payout": "node scripts/prod-mark-students-initial-payout.mjs",
+    "students:reset-renewal-requirements": "node scripts/reset-renewal-requirements.mjs",
+    "staging:students:reset-renewal-requirements": "node scripts/run-with-env-file.mjs .env.staging node scripts/reset-renewal-requirements.mjs"
   },
   "dependencies": {
     "@tanstack/react-virtual": "^3.13.24",

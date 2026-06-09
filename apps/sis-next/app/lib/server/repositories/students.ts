@@ -18,10 +18,22 @@ import { getAdminDb } from "../firebase-admin";
 import { HttpError } from "../../shared/http";
 import { isAdminRole } from "../../shared/roles";
 import type { SessionUser } from "../../shared/user";
+import type { CurrentCycleConfig } from "../../shared/current-cycle";
 
 const db = getAdminDb();
 const DEFAULT_STUDENT_PAGE_SIZE = 75;
 const MAX_STUDENT_PAGE_SIZE = 250;
+
+type StudentPageFilters = {
+  query?: string;
+  school?: string;
+  barangay?: string;
+  batch?: string;
+  status?: string;
+  cycle?: Pick<CurrentCycleConfig, "cycle_key" | "school_year" | "sem_number">;
+  requirementsTab?: "non-payrolled" | "payrolled";
+  payrollTab?: "new" | "renewal";
+};
 
 function normalizeBoolean(value: unknown) {
   return value === true;
@@ -419,14 +431,170 @@ function normalizedPageLimit(value: unknown) {
   return Math.min(Math.floor(limit), MAX_STUDENT_PAGE_SIZE);
 }
 
+function normalizedFilterValue(value?: string) {
+  return String(value || "").trim().toLocaleLowerCase();
+}
+
+function hasInitialPayroll(student: Student) {
+  return student.payrolled === true || Boolean(student.payrolled_at);
+}
+
+function getSemesterRecordForCycle(
+  student: Student,
+  cycle?: Pick<CurrentCycleConfig, "cycle_key" | "school_year" | "sem_number">
+) {
+  if (!cycle?.cycle_key) return null;
+  return (Array.isArray(student.semester_records) ? student.semester_records : []).find(
+    (record) => record.cycle_key === cycle.cycle_key
+  ) || null;
+}
+
+function getSemesterRenewalRequirements(record: StudentSemesterRecord | null) {
+  return normalizeRenewalRequirementMap(record?.renewal_requirements ?? record?.requirements);
+}
+
+function getSemesterPayrollStatusFromRecord(record: StudentSemesterRecord | null): StudentSemesterRecord["payroll_status"] {
+  if (record?.payroll_status) return record.payroll_status;
+  if (record?.renewal_status === "payrolled") return "payrolled";
+  if (record?.renewal_status === "renewed") return "qualified";
+  return "not_qualified";
+}
+
+function isPayrolledForCycle(
+  student: Student,
+  cycle?: Pick<CurrentCycleConfig, "cycle_key" | "school_year" | "sem_number">
+) {
+  return getSemesterPayrollStatusFromRecord(getSemesterRecordForCycle(student, cycle)) === "payrolled";
+}
+
+function isInitialPayoutQualified(student: Student) {
+  return requirementMapComplete(normalizeRequirementMap(student.requirements, student));
+}
+
+function isRenewalPayoutQualified(record: StudentSemesterRecord | null) {
+  return renewalRequirementMapComplete(getSemesterRenewalRequirements(record));
+}
+
+function getSemesterPayoutType(
+  student: Student,
+  record: StudentSemesterRecord | null
+): StudentSemesterRecord["payout_type"] {
+  if (record?.payout_type === "initial" || record?.payout_type === "renewal") return record.payout_type;
+  if (hasInitialPayroll(student)) return "renewal";
+  return "initial";
+}
+
+function isQualifiedForPayroll(
+  student: Student,
+  cycle?: Pick<CurrentCycleConfig, "cycle_key" | "school_year" | "sem_number">
+) {
+  const record = getSemesterRecordForCycle(student, cycle);
+  if (getSemesterPayrollStatusFromRecord(record) === "payrolled") return false;
+  return getSemesterPayoutType(student, record) === "renewal"
+    ? hasInitialPayroll(student) && isRenewalPayoutQualified(record)
+    : isInitialPayoutQualified(student);
+}
+
+function matchesStudentFilters(student: Student, filters: StudentPageFilters) {
+  const query = normalizedFilterValue(filters.query);
+  const school = normalizedFilterValue(filters.school);
+  const barangay = normalizedFilterValue(filters.barangay);
+
+  if (query) {
+    const haystack = [student.full_name, student.student_id, student.student_number]
+      .join(" ")
+      .toLocaleLowerCase();
+    if (!haystack.includes(query)) return false;
+  }
+
+  if (school && !String(student.school_address || "").toLocaleLowerCase().includes(school)) return false;
+  if (barangay && !String(student.barangay || "").toLocaleLowerCase().includes(barangay)) return false;
+  if (filters.batch && filters.batch !== "all" && student.batch !== filters.batch) return false;
+
+  if (filters.requirementsTab === "payrolled" && !isPayrolledForCycle(student, filters.cycle)) return false;
+  if (filters.requirementsTab === "non-payrolled" && isPayrolledForCycle(student, filters.cycle)) return false;
+
+  if (filters.payrollTab) {
+    const payoutType = filters.payrollTab === "renewal" ? "renewal" : "initial";
+    const record = getSemesterRecordForCycle(student, filters.cycle);
+    if (getSemesterPayoutType(student, record) !== payoutType) return false;
+  }
+
+  switch (filters.status) {
+    case "complete":
+      return isInitialPayoutQualified(student);
+    case "incomplete":
+      return !isInitialPayoutQualified(student);
+    case "payrolled":
+      return isPayrolledForCycle(student, filters.cycle);
+    case "unpayrolled":
+      return !isPayrolledForCycle(student, filters.cycle);
+    case "renewed":
+    case "qualified":
+      return isQualifiedForPayroll(student, filters.cycle) || isPayrolledForCycle(student, filters.cycle);
+    case "unrenewed":
+    case "not_qualified":
+      return !isQualifiedForPayroll(student, filters.cycle) && !isPayrolledForCycle(student, filters.cycle);
+    case "payroll_candidates":
+      return isQualifiedForPayroll(student, filters.cycle);
+    case "all":
+    case "":
+    case undefined:
+      return true;
+    default:
+      return true;
+  }
+}
+
+function hasStudentPageFilters(filters?: StudentPageFilters) {
+  if (!filters) return false;
+  return Boolean(
+    filters.query ||
+      filters.school ||
+      filters.barangay ||
+      (filters.batch && filters.batch !== "all") ||
+      (filters.status && filters.status !== "all") ||
+      filters.requirementsTab ||
+      filters.payrollTab
+  );
+}
+
 export async function listStudentsPage({
   cursor,
-  limit
+  limit,
+  filters
 }: {
   cursor?: string | null;
   limit?: number;
+  filters?: StudentPageFilters;
 } = {}) {
   const pageLimit = normalizedPageLimit(limit);
+
+  if (hasStudentPageFilters(filters)) {
+    const snapshot = await db.collection(COLLECTIONS.students).get();
+    const students = snapshot.docs
+      .map((docSnap) => normalizeStudentRecord(docSnap.data() as Student, { student_id: docSnap.id }))
+      .filter((student) => matchesStudentFilters(student, filters || {}))
+      .sort((left, right) =>
+        left.student_id.localeCompare(right.student_id, undefined, { numeric: true, sensitivity: "base" })
+      );
+    const startIndex = cursor
+      ? Math.max(students.findIndex((student) => student.student_id === cursor) + 1, 0)
+      : 0;
+    const pageStudents = students.slice(startIndex, startIndex + pageLimit);
+    const nextCursor =
+      startIndex + pageStudents.length < students.length
+        ? pageStudents[pageStudents.length - 1]?.student_id ?? null
+        : null;
+
+    return {
+      students: pageStudents,
+      nextCursor,
+      hasMore: Boolean(nextCursor),
+      limit: pageLimit
+    };
+  }
+
   let query: Query = db
     .collection(COLLECTIONS.students)
     .orderBy(FieldPath.documentId())
