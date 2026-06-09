@@ -3530,45 +3530,53 @@ export function AppShell({
               title="Payroll Scope"
               subtitle={`${stats.payrollRecords} payroll records are currently loaded.`}
             >
-              <div className="segmented-control payroll-tabs" role="tablist" aria-label="Payroll student scope">
-                <button
-                  type="button"
-                  className={payrollTab === "new" ? "active" : ""}
-                  onClick={() => setPayrollTab("new")}
-                  role="tab"
-                  aria-selected={payrollTab === "new"}
-                >
-                  New
-                </button>
-                <button
-                  type="button"
-                  className={payrollTab === "renewal" ? "active" : ""}
-                  onClick={() => setPayrollTab("renewal")}
-                  role="tab"
-                  aria-selected={payrollTab === "renewal"}
-                >
-                  Renewal
-                </button>
-              </div>
-              <div className="segmented-control payroll-tabs" role="tablist" aria-label="Payroll receipt status">
-                <button
-                  type="button"
-                  className={payrollStatusFilter === "payroll_candidates" ? "active" : ""}
-                  onClick={() => setPayrollStatusFilter("payroll_candidates")}
-                  role="tab"
-                  aria-selected={payrollStatusFilter === "payroll_candidates"}
-                >
-                  Not Yet Received
-                </button>
-                <button
-                  type="button"
-                  className={payrollStatusFilter === "payrolled" ? "active" : ""}
-                  onClick={() => setPayrollStatusFilter("payrolled")}
-                  role="tab"
-                  aria-selected={payrollStatusFilter === "payrolled"}
-                >
-                  Received
-                </button>
+              <div className="payroll-scope-grid">
+                <div className="payroll-scope-group">
+                  <span className="payroll-scope-label">Student Type</span>
+                  <div className="segmented-control payroll-tabs" role="tablist" aria-label="Payroll student scope">
+                    <button
+                      type="button"
+                      className={payrollTab === "new" ? "active" : ""}
+                      onClick={() => setPayrollTab("new")}
+                      role="tab"
+                      aria-selected={payrollTab === "new"}
+                    >
+                      New
+                    </button>
+                    <button
+                      type="button"
+                      className={payrollTab === "renewal" ? "active" : ""}
+                      onClick={() => setPayrollTab("renewal")}
+                      role="tab"
+                      aria-selected={payrollTab === "renewal"}
+                    >
+                      Renewal
+                    </button>
+                  </div>
+                </div>
+                <div className="payroll-scope-group">
+                  <span className="payroll-scope-label">Semester Payroll</span>
+                  <div className="segmented-control payroll-tabs" role="tablist" aria-label="Payroll receipt status">
+                    <button
+                      type="button"
+                      className={payrollStatusFilter === "payroll_candidates" ? "active" : ""}
+                      onClick={() => setPayrollStatusFilter("payroll_candidates")}
+                      role="tab"
+                      aria-selected={payrollStatusFilter === "payroll_candidates"}
+                    >
+                      Not Yet Received
+                    </button>
+                    <button
+                      type="button"
+                      className={payrollStatusFilter === "payrolled" ? "active" : ""}
+                      onClick={() => setPayrollStatusFilter("payrolled")}
+                      role="tab"
+                      aria-selected={payrollStatusFilter === "payrolled"}
+                    >
+                      Received
+                    </button>
+                  </div>
+                </div>
               </div>
             </Surface>
             <Surface
