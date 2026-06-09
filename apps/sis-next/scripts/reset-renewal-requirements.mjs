@@ -230,7 +230,24 @@ async function main() {
   console.log(`Scope: ${scopeLabel}`);
   console.log(`Reset non-payrolled statuses: ${args.resetUnpayrolledStatus ? "yes" : "no"}`);
 
-  const studentsSnapshot = await db.collection("students").get();
+  let studentsSnapshot;
+  try {
+    studentsSnapshot = await db.collection("students").get();
+  } catch (error) {
+    if (error?.code === 7) {
+      throw new Error(
+        [
+          "Firestore denied access to the students collection.",
+          `Project: ${projectId}`,
+          `Database: ${databaseId}`,
+          `Credential: ${credentialLabel}`,
+          "Grant this service account a Firestore IAM role with read/write access, such as Cloud Datastore User (roles/datastore.user) or Cloud Datastore Owner (roles/datastore.owner), then rerun the dry run.",
+          "Firebase security rules are not the issue here; firebase-admin uses IAM permissions."
+        ].join("\n")
+      );
+    }
+    throw error;
+  }
   const plannedUpdates = [];
   const backupRecords = [];
   let touchedSemesterRecords = 0;

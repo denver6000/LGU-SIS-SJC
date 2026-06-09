@@ -425,6 +425,21 @@ export async function listStudents() {
   return snapshot.docs.map((docSnap) => normalizeStudentRecord(docSnap.data() as Student, { student_id: docSnap.id }));
 }
 
+export async function getStudentStats(cycle?: Pick<CurrentCycleConfig, "cycle_key" | "school_year" | "sem_number">) {
+  const snapshot = await db.collection(COLLECTIONS.students).get();
+  const students = snapshot.docs.map((docSnap) =>
+    normalizeStudentRecord(docSnap.data() as Student, { student_id: docSnap.id })
+  );
+
+  return {
+    total: students.length,
+    claimed: students.filter((student) => student.claimed).length,
+    payrollCandidates: cycle
+      ? students.filter((student) => isQualifiedForPayroll(student, cycle)).length
+      : 0
+  };
+}
+
 function normalizedPageLimit(value: unknown) {
   const limit = Number(value || DEFAULT_STUDENT_PAGE_SIZE);
   if (!Number.isFinite(limit) || limit <= 0) return DEFAULT_STUDENT_PAGE_SIZE;

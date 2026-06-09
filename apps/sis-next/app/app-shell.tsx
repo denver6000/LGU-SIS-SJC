@@ -1569,13 +1569,13 @@ export function AppShell({
 
   const stats = useMemo(
     () => ({
-      total: students.length,
-      claimed: students.filter((student) => student.claimed).length,
-      renewedPending: students.filter((student) => isPayrollCandidateForCycle(student, currentCycle)).length,
+      total: initialData.stats.studentsTotal,
+      claimed: initialData.stats.claimed,
+      renewedPending: initialData.stats.payrollCandidates,
       trash: trash.length,
       payrollRecords: payoutRecords.length
     }),
-    [currentCycle, payoutRecords.length, students, trash]
+    [initialData.stats.claimed, initialData.stats.payrollCandidates, initialData.stats.studentsTotal, payoutRecords.length, trash.length]
   );
 
   function showNotice(message: string, type: "success" | "error" | "info" = "success") {

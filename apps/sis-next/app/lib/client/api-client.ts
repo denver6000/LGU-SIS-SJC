@@ -32,6 +32,11 @@ async function request<T>(input: RequestInfo | URL, init?: RequestInit) {
 export type AppInitialData = {
   user: SessionUser;
   currentCycle: CurrentCycleConfig;
+  stats: {
+    studentsTotal: number;
+    claimed: number;
+    payrollCandidates: number;
+  };
   students: Student[];
   trash: Student[];
   payoutRecords: PayoutRecord[];

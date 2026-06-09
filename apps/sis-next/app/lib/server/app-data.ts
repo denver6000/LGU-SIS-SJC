@@ -12,7 +12,7 @@ import { listOptions, listSchoolCourses } from "./repositories/options";
 import { listOperationLogs } from "./repositories/operation-logs";
 import { listPayoutRecords } from "./repositories/payout-records";
 import { getCurrentCycleConfig } from "./repositories/system-config";
-import { listStudents, listTrash } from "./repositories/students";
+import { getStudentStats, listStudents, listTrash } from "./repositories/students";
 import type { SessionUser } from "../shared/user";
 import { getAuthIdTokenFromHeaders } from "./auth";
 import { getServerAppFirestore } from "./firebase-server-app";
@@ -79,10 +79,16 @@ export async function getAppInitialData(user: SessionUser, options: AppInitialDa
       listOptions("batches"),
       listSchoolCourses()
     ]);
+  const studentStats = await getStudentStats(currentCycle as CurrentCycleConfig);
 
   const initialData: AppInitialData = {
     user,
     currentCycle: currentCycle as CurrentCycleConfig,
+    stats: {
+      studentsTotal: studentStats.total,
+      claimed: studentStats.claimed,
+      payrollCandidates: studentStats.payrollCandidates
+    },
     students,
     trash,
     payoutRecords,
