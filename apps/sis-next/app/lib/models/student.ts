@@ -3,6 +3,7 @@ import {
   REQUIREMENT_KEYS,
   RENEWAL_REQUIREMENT_KEYS,
   type Student,
+  type StudentPayrollStatus,
   type StudentPayoutType,
   type StudentRequirementMap,
   type StudentRenewalRequirementMap,
@@ -43,6 +44,10 @@ function emptyInitialRequirementMap(): StudentRequirementMap {
   return Object.fromEntries(REQUIREMENT_KEYS.map((key) => [key, false])) as StudentRequirementMap;
 }
 
+function emptyRenewalRequirementMap(): StudentRenewalRequirementMap {
+  return Object.fromEntries(RENEWAL_REQUIREMENT_KEYS.map((key) => [key, false])) as StudentRenewalRequirementMap;
+}
+
 function mergeInitialRequirementMaps(...maps: Array<Partial<StudentRequirementMap> | undefined>) {
   const requirements = emptyInitialRequirementMap();
 
@@ -53,6 +58,28 @@ function mergeInitialRequirementMaps(...maps: Array<Partial<StudentRequirementMa
   }
 
   return requirements;
+}
+
+function renewalRequirementMapFromAny(value: unknown): StudentRenewalRequirementMap {
+  const requirements = emptyRenewalRequirementMap();
+  const source =
+    value && typeof value === "object"
+      ? (value as Partial<Record<keyof StudentRenewalRequirementMap, unknown>>)
+      : {};
+
+  for (const key of RENEWAL_REQUIREMENT_KEYS) {
+    requirements[key] = source[key] === true;
+  }
+
+  return requirements;
+}
+
+function initialRequirementMapComplete(requirements: StudentRequirementMap) {
+  return REQUIREMENT_KEYS.every((key) => requirements[key]);
+}
+
+function renewalRequirementMapComplete(requirements: StudentRenewalRequirementMap) {
+  return RENEWAL_REQUIREMENT_KEYS.every((key) => requirements[key]);
 }
 
 export class StudentModel {
@@ -100,20 +127,60 @@ export class StudentModel {
     return this.semesterRecords.find((record) => record.cycle_key === cycle.cycle_key) || null;
   }
 
-  cyclePayrollStatus(cycle: Pick<CurrentCycleConfig, "cycle_key">) {
+  cyclePayoutType(cycle: Pick<CurrentCycleConfig, "cycle_key">): StudentPayoutType {
     const record = this.recordForCycle(cycle);
-    if (record?.payroll_status) return record.payroll_status;
-    if (record?.renewal_status === "payrolled") return "payrolled";
-    if (record?.renewal_status === "renewed") return "qualified";
-    return "not_qualified";
+    if (record?.payout_type === "initial" || record?.payout_type === "renewal") return record.payout_type;
+    return this.lifecycle;
+  }
+
+  cycleRenewalRequirements(cycle: Pick<CurrentCycleConfig, "cycle_key">) {
+    const record = this.recordForCycle(cycle);
+    return renewalRequirementMapFromAny(record?.renewal_requirements ?? record?.requirements);
+  }
+
+  get initialPayoutQualified() {
+    return initialRequirementMapComplete(this.globalInitialRequirements);
+  }
+
+  cycleRenewalPayoutQualified(cycle: Pick<CurrentCycleConfig, "cycle_key">) {
+    return renewalRequirementMapComplete(this.cycleRenewalRequirements(cycle));
+  }
+
+  isQualifiedForPayrollCycle(cycle: Pick<CurrentCycleConfig, "cycle_key">) {
+    if (this.isPayrolledForCycle(cycle)) return false;
+    return this.cyclePayoutType(cycle) === "renewal"
+      ? this.permanentPayrolled && this.cycleRenewalPayoutQualified(cycle)
+      : this.initialPayoutQualified;
+  }
+
+  cyclePayrollStatus(cycle: Pick<CurrentCycleConfig, "cycle_key">): StudentPayrollStatus {
+    if (this.isPayrolledForCycle(cycle)) return "payrolled";
+    return this.isQualifiedForPayrollCycle(cycle) ? "qualified" : "not_qualified";
   }
 
   isPayrolledForCycle(cycle: Pick<CurrentCycleConfig, "cycle_key">) {
     const record = this.recordForCycle(cycle);
     return (
-      this.cyclePayrollStatus(cycle) === "payrolled" ||
+      record?.payroll_status === "payrolled" ||
+      record?.renewal_status === "payrolled" ||
       Boolean(record?.payroll_id || record?.payrolled_at)
     );
+  }
+
+  isPayrollCandidateForCycle(cycle: Pick<CurrentCycleConfig, "cycle_key">) {
+    return !this.isPayrolledForCycle(cycle) && this.isQualifiedForPayrollCycle(cycle);
+  }
+
+  qualificationLabel(cycle: Pick<CurrentCycleConfig, "cycle_key">) {
+    const status = this.cyclePayrollStatus(cycle);
+    if (status === "payrolled") return "payrolled";
+    if (this.cyclePayoutType(cycle) === "renewal") {
+      if (!this.permanentPayrolled) return "needs initial payroll";
+      return this.cycleRenewalPayoutQualified(cycle)
+        ? "renewal qualified"
+        : "missing renewal requirements";
+    }
+    return this.initialPayoutQualified ? "initial payout qualified" : "missing initial requirements";
   }
 
   debugRow(source: StudentTimelineDebugRow["source"], cycle: CurrentCycleConfig): StudentTimelineDebugRow {
@@ -132,10 +199,10 @@ export class StudentModel {
       selected_cycle_payroll_status: this.cyclePayrollStatus(cycle),
       selected_cycle_renewal_status: record?.renewal_status || "",
       selected_cycle_payrolled: this.isPayrolledForCycle(cycle),
-      selected_cycle_record_payout_type: record?.payout_type || "",
+      selected_cycle_record_payout_type: record?.payout_type || this.cyclePayoutType(cycle),
       global_initial_ready: `${countReadyRequirements(this.globalInitialRequirements)}/${REQUIREMENT_KEYS.length}`,
       selected_cycle_initial_snapshot_ready: `${countReadyRequirements(record?.initial_payout_requirements)}/${REQUIREMENT_KEYS.length}`,
-      selected_cycle_renewal_ready: `${countReadyRenewalRequirements(record?.renewal_requirements ?? record?.requirements)}/${RENEWAL_REQUIREMENT_KEYS.length}`,
+      selected_cycle_renewal_ready: `${countReadyRenewalRequirements(this.cycleRenewalRequirements(cycle))}/${RENEWAL_REQUIREMENT_KEYS.length}`,
       semester_record_count: this.semesterRecords.length
     };
   }
@@ -151,6 +218,77 @@ export function hasPermanentPayroll(student: StudentDocShape) {
 
 export function lifecyclePayoutType(student: StudentDocShape): StudentPayoutType {
   return studentModel(student).lifecycle;
+}
+
+export function getStudentInitialPayoutRequirements(student: StudentDocShape) {
+  return studentModel(student).globalInitialRequirements;
+}
+
+export function getStudentSemesterRecordForCycle(
+  student: StudentDocShape,
+  cycle: Pick<CurrentCycleConfig, "cycle_key">
+) {
+  return studentModel(student).recordForCycle(cycle);
+}
+
+export function getStudentCycleRenewalRequirements(
+  student: StudentDocShape,
+  cycle: Pick<CurrentCycleConfig, "cycle_key">
+) {
+  return studentModel(student).cycleRenewalRequirements(cycle);
+}
+
+export function getStudentCyclePayoutType(
+  student: StudentDocShape,
+  cycle: Pick<CurrentCycleConfig, "cycle_key">
+) {
+  return studentModel(student).cyclePayoutType(cycle);
+}
+
+export function getStudentCyclePayrollStatus(
+  student: StudentDocShape,
+  cycle: Pick<CurrentCycleConfig, "cycle_key">
+) {
+  return studentModel(student).cyclePayrollStatus(cycle);
+}
+
+export function isStudentInitialPayoutQualified(student: StudentDocShape) {
+  return studentModel(student).initialPayoutQualified;
+}
+
+export function isStudentRenewalPayoutQualifiedForCycle(
+  student: StudentDocShape,
+  cycle: Pick<CurrentCycleConfig, "cycle_key">
+) {
+  return studentModel(student).cycleRenewalPayoutQualified(cycle);
+}
+
+export function isStudentQualifiedForPayrollCycle(
+  student: StudentDocShape,
+  cycle: Pick<CurrentCycleConfig, "cycle_key">
+) {
+  return studentModel(student).isQualifiedForPayrollCycle(cycle);
+}
+
+export function isStudentPayrolledForCycle(
+  student: StudentDocShape,
+  cycle: Pick<CurrentCycleConfig, "cycle_key">
+) {
+  return studentModel(student).isPayrolledForCycle(cycle);
+}
+
+export function isStudentPayrollCandidateForCycle(
+  student: StudentDocShape,
+  cycle: Pick<CurrentCycleConfig, "cycle_key">
+) {
+  return studentModel(student).isPayrollCandidateForCycle(cycle);
+}
+
+export function studentPayrollQualificationLabel(
+  student: StudentDocShape,
+  cycle: Pick<CurrentCycleConfig, "cycle_key">
+) {
+  return studentModel(student).qualificationLabel(cycle);
 }
 
 export function buildStudentTimelineDebugRows(

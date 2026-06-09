@@ -16,6 +16,12 @@ import type {
 import { COLLECTIONS } from "../../shared/collections";
 import { getAdminDb } from "../firebase-admin";
 import { HttpError } from "../../shared/http";
+import {
+  getStudentCyclePayoutType,
+  isStudentInitialPayoutQualified,
+  isStudentPayrolledForCycle,
+  isStudentQualifiedForPayrollCycle
+} from "../../models/student";
 import { isAdminRole } from "../../shared/roles";
 import type { SessionUser } from "../../shared/user";
 import type { CurrentCycleConfig } from "../../shared/current-cycle";
@@ -156,11 +162,9 @@ function normalizeSemesterRecords(value: unknown, fallbackInitialRequirements: S
     const payrollStatus =
       record.payroll_status === "payrolled" || legacyRenewalStatus === "payrolled"
         ? "payrolled"
-        : record.payroll_status === "qualified" ||
-            legacyRenewalStatus === "renewed" ||
-            (payoutType === "initial"
-              ? requirementMapComplete(initialPayoutRequirements)
-              : renewalRequirementMapComplete(renewalRequirements))
+        : (payoutType === "initial"
+            ? requirementMapComplete(initialPayoutRequirements)
+            : renewalRequirementMapComplete(renewalRequirements))
           ? "qualified"
           : "not_qualified";
 
@@ -450,64 +454,22 @@ function normalizedFilterValue(value?: string) {
   return String(value || "").trim().toLocaleLowerCase();
 }
 
-function hasInitialPayroll(student: Student) {
-  return student.payrolled === true || Boolean(student.payrolled_at);
-}
-
-function getSemesterRecordForCycle(
-  student: Student,
-  cycle?: Pick<CurrentCycleConfig, "cycle_key" | "school_year" | "sem_number">
-) {
-  if (!cycle?.cycle_key) return null;
-  return (Array.isArray(student.semester_records) ? student.semester_records : []).find(
-    (record) => record.cycle_key === cycle.cycle_key
-  ) || null;
-}
-
-function getSemesterRenewalRequirements(record: StudentSemesterRecord | null) {
-  return normalizeRenewalRequirementMap(record?.renewal_requirements ?? record?.requirements);
-}
-
-function getSemesterPayrollStatusFromRecord(record: StudentSemesterRecord | null): StudentSemesterRecord["payroll_status"] {
-  if (record?.payroll_status) return record.payroll_status;
-  if (record?.renewal_status === "payrolled") return "payrolled";
-  if (record?.renewal_status === "renewed") return "qualified";
-  return "not_qualified";
-}
-
 function isPayrolledForCycle(
   student: Student,
   cycle?: Pick<CurrentCycleConfig, "cycle_key" | "school_year" | "sem_number">
 ) {
-  return getSemesterPayrollStatusFromRecord(getSemesterRecordForCycle(student, cycle)) === "payrolled";
+  return cycle?.cycle_key ? isStudentPayrolledForCycle(student, cycle) : false;
 }
 
 function isInitialPayoutQualified(student: Student) {
-  return requirementMapComplete(normalizeRequirementMap(student.requirements, student));
-}
-
-function isRenewalPayoutQualified(record: StudentSemesterRecord | null) {
-  return renewalRequirementMapComplete(getSemesterRenewalRequirements(record));
-}
-
-function getSemesterPayoutType(
-  student: Student,
-  record: StudentSemesterRecord | null
-): StudentSemesterRecord["payout_type"] {
-  if (record?.payout_type === "initial" || record?.payout_type === "renewal") return record.payout_type;
-  if (hasInitialPayroll(student)) return "renewal";
-  return "initial";
+  return isStudentInitialPayoutQualified(student);
 }
 
 function isQualifiedForPayroll(
   student: Student,
   cycle?: Pick<CurrentCycleConfig, "cycle_key" | "school_year" | "sem_number">
 ) {
-  const record = getSemesterRecordForCycle(student, cycle);
-  if (getSemesterPayrollStatusFromRecord(record) === "payrolled") return false;
-  return getSemesterPayoutType(student, record) === "renewal"
-    ? hasInitialPayroll(student) && isRenewalPayoutQualified(record)
-    : isInitialPayoutQualified(student);
+  return cycle?.cycle_key ? isStudentQualifiedForPayrollCycle(student, cycle) : isInitialPayoutQualified(student);
 }
 
 function matchesStudentFilters(student: Student, filters: StudentPageFilters) {
@@ -531,8 +493,8 @@ function matchesStudentFilters(student: Student, filters: StudentPageFilters) {
 
   if (filters.payrollTab) {
     const payoutType = filters.payrollTab === "renewal" ? "renewal" : "initial";
-    const record = getSemesterRecordForCycle(student, filters.cycle);
-    if (getSemesterPayoutType(student, record) !== payoutType) return false;
+    if (!filters.cycle?.cycle_key) return false;
+    if (getStudentCyclePayoutType(student, filters.cycle) !== payoutType) return false;
   }
 
   switch (filters.status) {

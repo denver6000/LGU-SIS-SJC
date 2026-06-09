@@ -21,7 +21,19 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { updateEmail, updatePassword, updateProfile } from "firebase/auth";
 import { useAuth } from "./auth-provider";
 import { firebaseAuth } from "./lib/firebase-client";
-import { buildStudentTimelineDebugRows, hasPermanentPayroll, lifecyclePayoutType } from "./lib/models/student";
+import {
+  buildStudentTimelineDebugRows,
+  getStudentCyclePayrollStatus,
+  getStudentCyclePayoutType,
+  getStudentInitialPayoutRequirements,
+  getStudentSemesterRecordForCycle,
+  hasPermanentPayroll,
+  isStudentInitialPayoutQualified,
+  isStudentPayrolledForCycle,
+  isStudentPayrollCandidateForCycle,
+  isStudentQualifiedForPayrollCycle,
+  studentPayrollQualificationLabel
+} from "./lib/models/student";
 import { APP_VIEWS, isAdminOnlyView, labelForView, routeForView, type AppViewName } from "./lib/shared/views";
 import {
   createManagedUser,
@@ -479,11 +491,11 @@ function getSemesterRecords(student: Student) {
 }
 
 function getSemesterRecordForCycle(student: Student, currentCycle: CurrentCycleConfig) {
-  return getSemesterRecords(student).find((record) => record.cycle_key === currentCycle.cycle_key) || null;
+  return getStudentSemesterRecordForCycle(student, currentCycle);
 }
 
 function getInitialPayoutRequirements(student: Student) {
-  return getStudentRequirements(student);
+  return getStudentInitialPayoutRequirements(student);
 }
 
 function getSemesterRenewalRequirements(record: StudentSemesterRecord | null) {
@@ -496,19 +508,15 @@ function hasInitialPayroll(student: Student) {
 
 function getSemesterPayoutType(student: Student, record: StudentSemesterRecord | null): StudentSemesterRecord["payout_type"] {
   if (record?.payout_type === "initial" || record?.payout_type === "renewal") return record.payout_type;
-  const lifecycle = lifecyclePayoutType(student);
-  if (lifecycle === "renewal") return "renewal";
-  return "initial";
+  return hasInitialPayroll(student) ? "renewal" : "initial";
 }
 
 function getSemesterPayrollStatus(student: Student, cycle: CurrentCycleConfig): StudentSemesterRecord["payroll_status"] {
-  const record = getSemesterRecordForCycle(student, cycle);
-  if (getSemesterPayrollStatusFromRecord(record) === "payrolled") return "payrolled";
-  return isQualifiedForPayroll(student, cycle) ? "qualified" : "not_qualified";
+  return getStudentCyclePayrollStatus(student, cycle);
 }
 
 function isInitialPayoutQualified(student: Student) {
-  return requirementCompletionCount(getInitialPayoutRequirements(student)) === requirementFields.length;
+  return isStudentInitialPayoutQualified(student);
 }
 
 function isRenewalPayoutQualified(record: StudentSemesterRecord | null) {
@@ -516,48 +524,33 @@ function isRenewalPayoutQualified(record: StudentSemesterRecord | null) {
 }
 
 function isQualifiedForPayroll(student: Student, cycle: CurrentCycleConfig) {
-  const record = getSemesterRecordForCycle(student, cycle);
-  if (getSemesterPayrollStatusFromRecord(record) === "payrolled") return false;
-  return getSemesterPayoutType(student, record) === "renewal"
-    ? hasInitialPayroll(student) && isRenewalPayoutQualified(record)
-    : isInitialPayoutQualified(student);
+  return isStudentQualifiedForPayrollCycle(student, cycle);
 }
 
 function isPayrollCandidateForCycle(student: Student, cycle: CurrentCycleConfig) {
-  return !isPayrolledForCycle(student, cycle) && isQualifiedForPayroll(student, cycle);
+  return isStudentPayrollCandidateForCycle(student, cycle);
 }
 
 function isPayoutTypeForCycle(student: Student, cycle: CurrentCycleConfig, payoutType: StudentSemesterRecord["payout_type"]) {
-  const record = getSemesterRecordForCycle(student, cycle);
-  return getSemesterPayoutType(student, record) === payoutType;
+  return getStudentCyclePayoutType(student, cycle) === payoutType;
 }
 
 function payoutRecordTypeForCycle(student: Student, cycle: CurrentCycleConfig) {
-  const record = getSemesterRecordForCycle(student, cycle);
-  return getSemesterPayoutType(student, record) === "renewal" ? "renewal_payroll" : "initial_payout_payroll";
+  return getStudentCyclePayoutType(student, cycle) === "renewal" ? "renewal_payroll" : "initial_payout_payroll";
 }
 
 function payoutTypeLabelForCycle(student: Student, cycle: CurrentCycleConfig) {
-  const record = getSemesterRecordForCycle(student, cycle);
-  return getSemesterPayoutType(student, record) === "renewal" ? "Renewal" : "Initial payout";
+  return getStudentCyclePayoutType(student, cycle) === "renewal" ? "Renewal" : "Initial payout";
 }
 
 function getSemesterPayrollStatusFromRecord(record: StudentSemesterRecord | null): StudentSemesterRecord["payroll_status"] {
-  if (record?.payroll_status) return record.payroll_status;
+  if (record?.payroll_status === "payrolled") return "payrolled";
   if (record?.renewal_status === "payrolled") return "payrolled";
-  if (record?.renewal_status === "renewed") return "qualified";
   return "not_qualified";
 }
 
 function qualificationLabel(student: Student, cycle: CurrentCycleConfig) {
-  const record = getSemesterRecordForCycle(student, cycle);
-  const status = getSemesterPayrollStatus(student, cycle);
-  if (status === "payrolled") return "payrolled";
-  if (getSemesterPayoutType(student, record) === "renewal") {
-    if (!hasInitialPayroll(student)) return "needs initial payroll";
-    return isRenewalPayoutQualified(record) ? "renewal qualified" : "missing renewal requirements";
-  }
-  return isInitialPayoutQualified(student) ? "initial payout qualified" : "missing initial requirements";
+  return studentPayrollQualificationLabel(student, cycle);
 }
 
 function payrollStatusForDraft(student: Student, existingRecord: StudentSemesterRecord | null, draft: RenewalRecordDraft) {
