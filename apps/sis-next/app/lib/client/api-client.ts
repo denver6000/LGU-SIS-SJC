@@ -55,6 +55,7 @@ export type StudentPage = {
   nextCursor: string | null;
   hasMore: boolean;
   limit: number;
+  total: number;
 };
 
 export type StudentPageFilters = {
@@ -63,7 +64,7 @@ export type StudentPageFilters = {
   barangay?: string;
   batch?: string;
   status?: string;
-  requirementsTab?: "non-payrolled" | "payrolled";
+  requirementsTab?: "not-renewal" | "renewal";
   payrollTab?: "new" | "renewal";
   cycle?: {
     cycle_key: string;

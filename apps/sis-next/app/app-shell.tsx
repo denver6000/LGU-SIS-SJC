@@ -135,7 +135,7 @@ type RenewalRecordDraft = {
 };
 
 type PayrollMetadataDraft = PayrollExportMetadata;
-type RequirementsTab = "non-payrolled" | "payrolled";
+type RequirementsTab = "not-renewal" | "renewal";
 type PayrollTab = "new" | "renewal";
 type StudentLoadState = "idle" | "loading" | "loading-more" | "ready" | "error";
 type ConfirmationRequest = {
@@ -631,6 +631,11 @@ function semesterLabel(config: Pick<CurrentCycleConfig, "school_year" | "sem_num
   return `${config.school_year}, ${suffix} Semester`;
 }
 
+function loadedOfTotalText(loadedCount: number, totalCount: number, singularNoun: string) {
+  const total = Math.max(totalCount, loadedCount);
+  return `${loadedCount} ${singularNoun}${loadedCount === 1 ? "" : "s"} loaded of ${total} total`;
+}
+
 function isRenewedForCycle(student: Student, currentCycle: CurrentCycleConfig) {
   const status = getSemesterPayrollStatus(student, currentCycle);
   return status === "qualified" || status === "payrolled";
@@ -844,6 +849,7 @@ export function AppShell({
   const [studentPageCursor, setStudentPageCursor] = useState<string | null>(null);
   const [studentHasMore, setStudentHasMore] = useState(false);
   const [studentLoadError, setStudentLoadError] = useState("");
+  const [studentTotalCount, setStudentTotalCount] = useState(initialData.stats.studentsTotal);
   const studentLoadRequestRef = useRef(0);
   const studentPageFilterKeyRef = useRef("");
   const [trash, setTrash] = useState<Student[]>(initialData.trash);
@@ -859,7 +865,7 @@ export function AppShell({
   const [renewalRecordDraft, setRenewalRecordDraft] = useState<RenewalRecordDraft>(() => emptyRenewalRecordDraft());
   const [requirementsSchoolYear, setRequirementsSchoolYear] = useState(initialData.currentCycle.school_year);
   const [requirementsSemester, setRequirementsSemester] = useState(String(initialData.currentCycle.sem_number));
-  const [requirementsTab, setRequirementsTab] = useState<RequirementsTab>("non-payrolled");
+  const [requirementsTab, setRequirementsTab] = useState<RequirementsTab>("not-renewal");
   const [requirementsNameFilter, setRequirementsNameFilter] = useState("");
   const [requirementsSchoolFilter, setRequirementsSchoolFilter] = useState("");
   const [requirementsBarangayFilter, setRequirementsBarangayFilter] = useState("");
@@ -941,7 +947,7 @@ export function AppShell({
         renewalRecordDraft?: Partial<RenewalRecordDraft>;
         requirementsSchoolYear?: string;
         requirementsSemester?: string;
-        requirementsTab?: RequirementsTab;
+        requirementsTab?: RequirementsTab | "non-payrolled" | "payrolled";
         requirementsNameFilter?: string;
         requirementsSchoolFilter?: string;
         requirementsBarangayFilter?: string;
@@ -1009,8 +1015,12 @@ export function AppShell({
       }
       if (typeof state.requirementsSchoolYear === "string") setRequirementsSchoolYear(state.requirementsSchoolYear);
       if (typeof state.requirementsSemester === "string") setRequirementsSemester(state.requirementsSemester);
-      if (state.requirementsTab === "payrolled" || state.requirementsTab === "non-payrolled") {
+      if (state.requirementsTab === "renewal" || state.requirementsTab === "not-renewal") {
         setRequirementsTab(state.requirementsTab);
+      } else if (state.requirementsTab === "payrolled") {
+        setRequirementsTab("renewal");
+      } else if (state.requirementsTab === "non-payrolled") {
+        setRequirementsTab("not-renewal");
       }
       if (typeof state.requirementsNameFilter === "string") setRequirementsNameFilter(state.requirementsNameFilter);
       if (typeof state.requirementsSchoolFilter === "string") setRequirementsSchoolFilter(state.requirementsSchoolFilter);
@@ -1444,9 +1454,9 @@ export function AppShell({
       return true;
     });
     const rows = isAdmin
-      ? requirementsTab === "payrolled"
-        ? cycleFilteredStudents.filter((student) => isPayrolledForCycle(student, requirementsCycle))
-        : cycleFilteredStudents.filter((student) => !isPayrolledForCycle(student, requirementsCycle))
+      ? requirementsTab === "renewal"
+        ? cycleFilteredStudents.filter((student) => hasInitialPayroll(student))
+        : cycleFilteredStudents.filter((student) => !hasInitialPayroll(student))
       : cycleFilteredStudents;
 
     return rows.slice().sort(comparePayrollStudents);
@@ -1687,6 +1697,7 @@ export function AppShell({
       setStudents([]);
       setStudentPageCursor(null);
       setStudentHasMore(false);
+      setStudentTotalCount(0);
     }
 
     try {
@@ -1701,6 +1712,7 @@ export function AppShell({
       setStudents((current) => mergeStudentRecords(current, page.students, resetPage));
       setStudentPageCursor(page.nextCursor);
       setStudentHasMore(page.hasMore);
+      setStudentTotalCount(page.total);
       setStudentLoadState("ready");
     } catch (error) {
       if (studentLoadRequestRef.current !== requestId) return;
@@ -2751,7 +2763,7 @@ export function AppShell({
               subtitle={
                 studentInitialLoadPending
                   ? "Loading the first batch of active student records."
-                  : `${filteredStudents.length} loaded active student record${filteredStudents.length === 1 ? "" : "s"} match the current filters.`
+                  : `${loadedOfTotalText(filteredStudents.length, studentTotalCount, "active student record")} ${filteredStudents.length === 1 ? "matches" : "match"} the current filters.`
               }
             >
               {studentInitialLoadPending ? (
@@ -2803,6 +2815,7 @@ export function AppShell({
                     hasMore={studentHasMore}
                     isLoading={studentPageLoading}
                     loadedCount={students.length}
+                    totalCount={studentTotalCount}
                     onRetry={() => {
                       void loadStudentsPage({ reset: true });
                     }}
@@ -2835,7 +2848,7 @@ export function AppShell({
               subtitle={
                 studentInitialLoadPending
                   ? "Loading the first batch of student records."
-                  : `${filteredStudents.length} loaded record${filteredStudents.length === 1 ? "" : "s"} match the current filters.`
+                  : `${loadedOfTotalText(filteredStudents.length, studentTotalCount, "record")} ${filteredStudents.length === 1 ? "matches" : "match"} the current filters.`
               }
             >
               {studentInitialLoadPending ? (
@@ -2902,6 +2915,7 @@ export function AppShell({
                     hasMore={studentHasMore}
                     isLoading={studentPageLoading}
                     loadedCount={students.length}
+                    totalCount={studentTotalCount}
                     onRetry={() => {
                       void loadStudentsPage({ reset: true });
                     }}
@@ -3035,7 +3049,7 @@ export function AppShell({
               title="Requirements Timeline"
               description={
                 isAdmin
-                  ? "Manage student requirements by school year and semester, then move records from non-payrolled to payrolled when payroll is ready."
+                  ? "Manage initial and renewal requirements by school year and semester."
                   : "Manage student requirements by school year and semester from one focused workspace."
               }
             />
@@ -3077,29 +3091,29 @@ export function AppShell({
                 studentInitialLoadPending
                   ? `Loading students for ${semesterLabel(requirementsCycle)}.`
                   : isAdmin
-                    ? `${requirementRows.length} loaded ${requirementsTab === "payrolled" ? "payrolled" : "non-payrolled"} student${requirementRows.length === 1 ? "" : "s"} for ${semesterLabel(requirementsCycle)}.`
-                    : `${requirementRows.length} loaded student${requirementRows.length === 1 ? "" : "s"} for ${semesterLabel(requirementsCycle)}.`
+                    ? `${loadedOfTotalText(requirementRows.length, studentTotalCount, `${requirementsTab === "renewal" ? "renewal" : "not-renewal"} student`)} for ${semesterLabel(requirementsCycle)}.`
+                    : `${loadedOfTotalText(requirementRows.length, studentTotalCount, "student")} for ${semesterLabel(requirementsCycle)}.`
               }
               actions={
                 isAdmin ? (
-                  <div className="segmented-control" role="tablist" aria-label="Requirement payroll status">
+                  <div className="segmented-control" role="tablist" aria-label="Requirement student type">
                     <button
                       type="button"
-                      className={requirementsTab === "non-payrolled" ? "active" : ""}
-                      onClick={() => setRequirementsTab("non-payrolled")}
+                      className={requirementsTab === "not-renewal" ? "active" : ""}
+                      onClick={() => setRequirementsTab("not-renewal")}
                       role="tab"
-                      aria-selected={requirementsTab === "non-payrolled"}
+                      aria-selected={requirementsTab === "not-renewal"}
                     >
-                      Non-Payrolled
+                      Not-Renewal
                     </button>
                     <button
                       type="button"
-                      className={requirementsTab === "payrolled" ? "active" : ""}
-                      onClick={() => setRequirementsTab("payrolled")}
+                      className={requirementsTab === "renewal" ? "active" : ""}
+                      onClick={() => setRequirementsTab("renewal")}
                       role="tab"
-                      aria-selected={requirementsTab === "payrolled"}
+                      aria-selected={requirementsTab === "renewal"}
                     >
-                      Payrolled
+                      Renewal
                     </button>
                   </div>
                 ) : null
@@ -3215,6 +3229,7 @@ export function AppShell({
                     hasMore={studentHasMore}
                     isLoading={studentPageLoading}
                     loadedCount={students.length}
+                    totalCount={studentTotalCount}
                     onRetry={() => {
                       void loadStudentsPage({ reset: true });
                     }}
@@ -3576,8 +3591,8 @@ export function AppShell({
               title={`${payrollTab === "new" ? "New" : "Renewal"} Payroll`}
               subtitle={
                 payrollStatusFilter === "payrolled"
-                  ? `${payrollRows.length} student${payrollRows.length === 1 ? "" : "s"} have received ${payrollTab === "new" ? "new" : "renewal"} payroll for ${semesterLabel(payrollCycle)}.`
-                  : `${selectedPayrollRows.length} students selected from ${payrollRows.length} qualified unpaid ${payrollTab === "new" ? "new" : "renewal"} records for ${semesterLabel(payrollCycle)}.`
+                  ? `${loadedOfTotalText(payrollRows.length, studentTotalCount, "student")} ${payrollRows.length === 1 ? "has" : "have"} received ${payrollTab === "new" ? "new" : "renewal"} payroll for ${semesterLabel(payrollCycle)}.`
+                  : `${selectedPayrollRows.length} students selected from ${loadedOfTotalText(payrollRows.length, studentTotalCount, `qualified unpaid ${payrollTab === "new" ? "new" : "renewal"} record`)} for ${semesterLabel(payrollCycle)}.`
               }
               actions={
                 <div className="button-row">
@@ -3708,6 +3723,7 @@ export function AppShell({
                 hasMore={studentHasMore}
                 isLoading={studentPageLoading}
                 loadedCount={students.length}
+                totalCount={studentTotalCount}
                 onRetry={() => {
                   void loadStudentsPage({ reset: true });
                 }}
@@ -4713,14 +4729,18 @@ function StudentLoadControls({
   hasMore,
   isLoading,
   loadedCount,
+  totalCount,
   onRetry
 }: {
   error: string;
   hasMore: boolean;
   isLoading: boolean;
   loadedCount: number;
+  totalCount: number;
   onRetry: () => void;
 }) {
+  const loadedSummary = loadedOfTotalText(loadedCount, totalCount, "student");
+
   if (error && loadedCount === 0) {
     return (
       <div className="student-load-footer error">
@@ -4732,18 +4752,18 @@ function StudentLoadControls({
     );
   }
 
-  if (!hasMore && !error) return null;
-
   return (
     <div className={`student-load-footer ${error ? "error" : ""}`}>
       <span>
         {error
           ? error
+          : isLoading
+            ? loadedCount || totalCount
+              ? `Loading more students... ${loadedSummary}.`
+              : "Loading students..."
           : hasMore
-            ? isLoading
-              ? "Loading more students..."
-              : `${loadedCount} student${loadedCount === 1 ? "" : "s"} loaded.`
-            : "All loaded students are visible."}
+            ? `${loadedSummary}.`
+            : `${loadedSummary}.`}
       </span>
     </div>
   );

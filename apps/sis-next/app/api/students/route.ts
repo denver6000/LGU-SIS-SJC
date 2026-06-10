@@ -20,11 +20,12 @@ export async function GET(request: Request) {
           barangay: url.searchParams.get("barangay") || undefined,
           batch: url.searchParams.get("batch") || undefined,
           status: url.searchParams.get("status") || undefined,
-          requirementsTab:
-            url.searchParams.get("requirementsTab") === "payrolled" ||
-            url.searchParams.get("requirementsTab") === "non-payrolled"
-              ? (url.searchParams.get("requirementsTab") as "payrolled" | "non-payrolled")
-              : undefined,
+          requirementsTab: (() => {
+            const value = url.searchParams.get("requirementsTab");
+            if (value === "renewal" || value === "payrolled") return "renewal";
+            if (value === "not-renewal" || value === "non-payrolled") return "not-renewal";
+            return undefined;
+          })(),
           payrollTab:
             url.searchParams.get("payrollTab") === "new" ||
             url.searchParams.get("payrollTab") === "renewal"

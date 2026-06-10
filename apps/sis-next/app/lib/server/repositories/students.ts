@@ -18,6 +18,7 @@ import { getAdminDb } from "../firebase-admin";
 import { HttpError } from "../../shared/http";
 import {
   getStudentCyclePayoutType,
+  hasPermanentPayroll,
   isStudentInitialPayoutQualified,
   isStudentPayrolledForCycle,
   isStudentQualifiedForPayrollCycle
@@ -37,7 +38,7 @@ type StudentPageFilters = {
   batch?: string;
   status?: string;
   cycle?: Pick<CurrentCycleConfig, "cycle_key" | "school_year" | "sem_number">;
-  requirementsTab?: "non-payrolled" | "payrolled";
+  requirementsTab?: "not-renewal" | "renewal";
   payrollTab?: "new" | "renewal";
 };
 
@@ -488,8 +489,8 @@ function matchesStudentFilters(student: Student, filters: StudentPageFilters) {
   if (barangay && !String(student.barangay || "").toLocaleLowerCase().includes(barangay)) return false;
   if (filters.batch && filters.batch !== "all" && student.batch !== filters.batch) return false;
 
-  if (filters.requirementsTab === "payrolled" && !isPayrolledForCycle(student, filters.cycle)) return false;
-  if (filters.requirementsTab === "non-payrolled" && isPayrolledForCycle(student, filters.cycle)) return false;
+  if (filters.requirementsTab === "renewal" && !hasPermanentPayroll(student)) return false;
+  if (filters.requirementsTab === "not-renewal" && hasPermanentPayroll(student)) return false;
 
   if (filters.payrollTab) {
     const payoutType = filters.payrollTab === "renewal" ? "renewal" : "initial";
@@ -568,30 +569,36 @@ export async function listStudentsPage({
       students: pageStudents,
       nextCursor,
       hasMore: Boolean(nextCursor),
-      limit: pageLimit
+      limit: pageLimit,
+      total: students.length
     };
   }
+
+  const totalSnapshot = await db.collection(COLLECTIONS.students).count().get();
+  const total = totalSnapshot.data().count;
 
   let query: Query = db
     .collection(COLLECTIONS.students)
     .orderBy(FieldPath.documentId())
-    .limit(pageLimit);
+    .limit(pageLimit + 1);
 
   if (cursor) {
     query = query.startAfter(cursor);
   }
 
   const snapshot = await query.get();
-  const students = snapshot.docs.map((docSnap) =>
+  const pageDocs = snapshot.docs.slice(0, pageLimit);
+  const students = pageDocs.map((docSnap) =>
     normalizeStudentRecord(docSnap.data() as Student, { student_id: docSnap.id })
   );
-  const lastDocument = snapshot.docs[snapshot.docs.length - 1];
+  const lastDocument = pageDocs[pageDocs.length - 1];
 
   return {
     students,
-    nextCursor: snapshot.size === pageLimit && lastDocument ? lastDocument.id : null,
-    hasMore: snapshot.size === pageLimit,
-    limit: pageLimit
+    nextCursor: snapshot.size > pageLimit && lastDocument ? lastDocument.id : null,
+    hasMore: snapshot.size > pageLimit,
+    limit: pageLimit,
+    total
   };
 }
 
