@@ -18,7 +18,7 @@ import { getAdminDb } from "../firebase-admin";
 import { HttpError } from "../../shared/http";
 import {
   getStudentCyclePayoutType,
-  hasPermanentPayroll,
+  isStudentForRenewal,
   isStudentInitialPayoutQualified,
   isStudentPayrolledForCycle,
   isStudentQualifiedForPayrollCycle
@@ -307,14 +307,12 @@ function canMutatePayrollState(actor?: SessionUser | null) {
 }
 
 function isRequirementsOnlyUpdate(input: StudentInput) {
-  const allowedFields = new Set<keyof StudentInput>(["requirements", "semester_records"]);
+  const allowedFields = new Set<keyof StudentInput>(["requirements", "semester_records", "renewed", "renewed_at"]);
   return Object.keys(input).every((key) => allowedFields.has(key as keyof StudentInput));
 }
 
 function preservePayrollFieldsForEncoder(input: StudentInput, existing: Student): StudentInput {
   const sanitized: StudentInput = { ...input };
-  delete sanitized.renewed;
-  delete sanitized.renewed_at;
   delete sanitized.payrolled;
   delete sanitized.payrolled_at;
 
@@ -489,8 +487,8 @@ function matchesStudentFilters(student: Student, filters: StudentPageFilters) {
   if (barangay && !String(student.barangay || "").toLocaleLowerCase().includes(barangay)) return false;
   if (filters.batch && filters.batch !== "all" && student.batch !== filters.batch) return false;
 
-  if (filters.requirementsTab === "renewal" && !hasPermanentPayroll(student)) return false;
-  if (filters.requirementsTab === "not-renewal" && hasPermanentPayroll(student)) return false;
+  if (filters.requirementsTab === "renewal" && !isStudentForRenewal(student)) return false;
+  if (filters.requirementsTab === "not-renewal" && isStudentForRenewal(student)) return false;
 
   if (filters.payrollTab) {
     const payoutType = filters.payrollTab === "renewal" ? "renewal" : "initial";

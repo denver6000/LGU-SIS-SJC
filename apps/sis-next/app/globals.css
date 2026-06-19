@@ -938,6 +938,10 @@ table {
   margin: 0;
 }
 
+.document-check.compact-check {
+  min-height: 44px;
+}
+
 .document-check span {
   line-height: 1.25;
   text-transform: capitalize;

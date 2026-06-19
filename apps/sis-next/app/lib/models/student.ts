@@ -109,8 +109,12 @@ export class StudentModel {
     );
   }
 
+  get forRenewal() {
+    return this.topLevelRenewed || this.permanentPayrolled;
+  }
+
   get lifecycle(): StudentPayoutType {
-    return this.permanentPayrolled ? "renewal" : "initial";
+    return this.forRenewal ? "renewal" : "initial";
   }
 
   get globalInitialRequirements() {
@@ -149,7 +153,7 @@ export class StudentModel {
   isQualifiedForPayrollCycle(cycle: Pick<CurrentCycleConfig, "cycle_key">) {
     if (this.isPayrolledForCycle(cycle)) return false;
     return this.cyclePayoutType(cycle) === "renewal"
-      ? this.permanentPayrolled && this.cycleRenewalPayoutQualified(cycle)
+      ? this.forRenewal && this.cycleRenewalPayoutQualified(cycle)
       : this.initialPayoutQualified;
   }
 
@@ -175,7 +179,7 @@ export class StudentModel {
     const status = this.cyclePayrollStatus(cycle);
     if (status === "payrolled") return "payrolled";
     if (this.cyclePayoutType(cycle) === "renewal") {
-      if (!this.permanentPayrolled) return "needs initial payroll";
+      if (!this.forRenewal) return "not marked for renewal";
       return this.cycleRenewalPayoutQualified(cycle)
         ? "renewal qualified"
         : "missing renewal requirements";
@@ -214,6 +218,10 @@ export function studentModel(student: StudentDocShape) {
 
 export function hasPermanentPayroll(student: StudentDocShape) {
   return studentModel(student).permanentPayrolled;
+}
+
+export function isStudentForRenewal(student: StudentDocShape) {
+  return studentModel(student).forRenewal;
 }
 
 export function lifecyclePayoutType(student: StudentDocShape): StudentPayoutType {

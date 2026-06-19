@@ -28,6 +28,7 @@ import {
   getStudentInitialPayoutRequirements,
   getStudentSemesterRecordForCycle,
   hasPermanentPayroll,
+  isStudentForRenewal,
   isStudentInitialPayoutQualified,
   isStudentPayrolledForCycle,
   isStudentPayrollCandidateForCycle,
@@ -103,6 +104,7 @@ type StudentDraft = {
   school_course: string;
   year_level: string;
   batch: string;
+  renewed: boolean;
   requirements: StudentRequirementMap;
 };
 
@@ -129,6 +131,7 @@ type CurrentCycleDraft = {
 
 type RenewalRecordDraft = {
   payout_type: StudentSemesterRecord["payout_type"];
+  renewed: boolean;
   initial_payout_requirements: StudentRequirementMap;
   renewal_requirements: StudentRenewalRequirementMap;
   notes: string;
@@ -314,6 +317,7 @@ function emptyStudentDraft(): StudentDraft {
     school_course: "",
     year_level: "",
     batch: "",
+    renewed: false,
     requirements: emptyRequirementMap()
   };
 }
@@ -374,6 +378,7 @@ function generateSchoolYearOptions(anchorSchoolYear: string) {
 function emptyRenewalRecordDraft(): RenewalRecordDraft {
   return {
     payout_type: "initial",
+    renewed: false,
     initial_payout_requirements: emptyRequirementMap(),
     renewal_requirements: emptyRenewalRequirementMap(),
     notes: ""
@@ -502,13 +507,25 @@ function getSemesterRenewalRequirements(record: StudentSemesterRecord | null) {
   return renewalRequirementMapFromAny(record?.renewal_requirements ?? record?.requirements);
 }
 
+function hasManualRenewalIndicator(student: Pick<Student, "renewed" | "renewed_at">) {
+  return student.renewed === true || Boolean(student.renewed_at);
+}
+
 function hasInitialPayroll(student: Student) {
   return hasPermanentPayroll(student);
 }
 
+function isForRenewalStudent(student: Student) {
+  return isStudentForRenewal(student);
+}
+
+function isForRenewalDraft(student: Student, draft: RenewalRecordDraft) {
+  return hasInitialPayroll(student) || draft.renewed;
+}
+
 function getSemesterPayoutType(student: Student, record: StudentSemesterRecord | null): StudentSemesterRecord["payout_type"] {
   if (record?.payout_type === "initial" || record?.payout_type === "renewal") return record.payout_type;
-  return hasInitialPayroll(student) ? "renewal" : "initial";
+  return isForRenewalStudent(student) ? "renewal" : "initial";
 }
 
 function getSemesterPayrollStatus(student: Student, cycle: CurrentCycleConfig): StudentSemesterRecord["payroll_status"] {
@@ -558,7 +575,7 @@ function payrollStatusForDraft(student: Student, existingRecord: StudentSemester
   const initialComplete = requirementCompletionCount(draft.initial_payout_requirements) === requirementFields.length;
   const renewalComplete = renewalRequirementCompletionCount(draft.renewal_requirements) === renewalRequirementFields.length;
   return draft.payout_type === "renewal"
-    ? hasInitialPayroll(student) && renewalComplete
+    ? isForRenewalDraft(student, draft) && renewalComplete
       ? "qualified"
       : "not_qualified"
     : initialComplete
@@ -570,7 +587,7 @@ function qualificationLabelForDraft(student: Student, existingRecord: StudentSem
   const status = payrollStatusForDraft(student, existingRecord, draft);
   if (status === "payrolled") return "payrolled";
   if (draft.payout_type === "renewal") {
-    if (!hasInitialPayroll(student)) return "needs initial payroll";
+    if (!isForRenewalDraft(student, draft)) return "not marked for renewal";
     return status === "qualified" ? "renewal qualified" : "missing renewal requirements";
   }
   return status === "qualified" ? "initial payout qualified" : "missing initial requirements";
@@ -578,10 +595,11 @@ function qualificationLabelForDraft(student: Student, existingRecord: StudentSem
 
 function legacyRenewalStatusForPayrollStatus(
   student: Student,
-  payrollStatus: StudentSemesterRecord["payroll_status"]
+  payrollStatus: StudentSemesterRecord["payroll_status"],
+  forRenewal = isForRenewalStudent(student)
 ): NonNullable<StudentSemesterRecord["renewal_status"]> {
   if (payrollStatus === "payrolled") return "payrolled";
-  if (payrollStatus === "qualified" && hasInitialPayroll(student)) return "renewed";
+  if (payrollStatus === "qualified" && forRenewal) return "renewed";
   return "pending";
 }
 
@@ -601,7 +619,7 @@ function buildSemesterRecordForCycle(
     cycle_key: currentCycle.cycle_key,
     payout_type: draft.payout_type,
     payroll_status: payrollStatus,
-    renewal_status: legacyRenewalStatusForPayrollStatus(student, payrollStatus),
+    renewal_status: legacyRenewalStatusForPayrollStatus(student, payrollStatus, isForRenewalDraft(student, draft)),
     initial_payout_requirements: draft.initial_payout_requirements,
     renewal_requirements: draft.renewal_requirements,
     requirements: draft.renewal_requirements,
@@ -810,6 +828,7 @@ function studentDraftFromAny(value: unknown): StudentDraft {
     school_course: String(source.school_course ?? "").trim(),
     year_level: String(source.year_level ?? "").trim(),
     batch: String(source.batch ?? "").trim(),
+    renewed: source.renewed === true,
     requirements: requirementMapFromLegacySource({
       ...source.requirements,
       certificate_of_residency: source.requirements?.certificate_of_residency ?? source.certificate_of_residency,
@@ -1006,6 +1025,7 @@ export function AppShell({
       if (state.renewalRecordDraft) {
         setRenewalRecordDraft({
           payout_type: state.renewalRecordDraft.payout_type === "renewal" ? "renewal" : "initial",
+          renewed: state.renewalRecordDraft.renewed === true,
           initial_payout_requirements: requirementMapFromLegacySource(state.renewalRecordDraft.initial_payout_requirements),
           renewal_requirements: renewalRequirementMapFromAny(
             state.renewalRecordDraft.renewal_requirements ?? (state.renewalRecordDraft as { requirements?: unknown }).requirements
@@ -1455,8 +1475,8 @@ export function AppShell({
     });
     const rows = isAdmin
       ? requirementsTab === "renewal"
-        ? cycleFilteredStudents.filter((student) => hasInitialPayroll(student))
-        : cycleFilteredStudents.filter((student) => !hasInitialPayroll(student))
+        ? cycleFilteredStudents.filter((student) => isForRenewalStudent(student))
+        : cycleFilteredStudents.filter((student) => !isForRenewalStudent(student))
       : cycleFilteredStudents;
 
     return rows.slice().sort(comparePayrollStudents);
@@ -1839,6 +1859,15 @@ export function AppShell({
     }));
   }
 
+  function patchRenewalIndicator(checked: boolean) {
+    setRenewalRecordDraft((current) => ({
+      ...current,
+      renewed: checked,
+      payout_type: checked ? "renewal" : "initial",
+      renewal_requirements: checked ? current.renewal_requirements : emptyRenewalRequirementMap()
+    }));
+  }
+
   function selectPayrollHistoryStudent(student: Student) {
     setPayrollHistoryStudentId(student.student_id);
     setPayrollHistoryQuery(`${student.full_name} (${student.student_id})`);
@@ -1857,6 +1886,7 @@ export function AppShell({
       school_course: student.school_course || "",
       year_level: student.year_level || "",
       batch: student.batch || "",
+      renewed: hasManualRenewalIndicator(student),
       requirements: getStudentRequirements(student)
     };
 
@@ -1882,6 +1912,7 @@ export function AppShell({
       currentRecord
         ? {
             payout_type: getSemesterPayoutType(student, currentRecord),
+            renewed: isForRenewalStudent(student),
             initial_payout_requirements: getInitialPayoutRequirements(student),
             renewal_requirements: getSemesterRenewalRequirements(currentRecord),
             notes: currentRecord.notes || ""
@@ -1889,7 +1920,8 @@ export function AppShell({
         : {
             ...emptyRenewalRecordDraft(),
             initial_payout_requirements: getInitialPayoutRequirements(student),
-            payout_type: hasInitialPayroll(student) ? "renewal" : "initial"
+            renewed: isForRenewalStudent(student),
+            payout_type: isForRenewalStudent(student) ? "renewal" : "initial"
           }
     );
   }
@@ -2001,11 +2033,11 @@ export function AppShell({
   async function handleSaveRenewalRecord() {
     if (!renewalRecordStudent) return;
 
-    if (!hasInitialPayroll(renewalRecordStudent) && renewalRequirementCompletionCount(renewalRecordDraft.renewal_requirements) > 0) {
+    if (!isForRenewalDraft(renewalRecordStudent, renewalRecordDraft) && renewalRequirementCompletionCount(renewalRecordDraft.renewal_requirements) > 0) {
       showValidationDialog({
-        title: "Complete Initial Payroll First",
-        message: "Initial payroll must be recorded before renewal requirements can be fulfilled.",
-        fields: ["Initial Payroll"],
+        title: "Mark Student For Renewal",
+        message: "Mark this student as for renewal before fulfilling renewal requirements.",
+        fields: ["For Renewal"],
         acknowledgeLabel: "Review Record"
       });
       return;
@@ -2026,11 +2058,20 @@ export function AppShell({
     if (!confirmed) return;
 
     try {
+      const updatePayload: Parameters<typeof updateStudent>[1] = {
+        requirements: renewalRecordDraft.initial_payout_requirements,
+        semester_records: nextSemesterRecords
+      };
+
+      if (!hasInitialPayroll(renewalRecordStudent)) {
+        updatePayload.renewed = renewalRecordDraft.renewed;
+        updatePayload.renewed_at = renewalRecordDraft.renewed
+          ? renewalRecordStudent.renewed_at || new Date().toISOString()
+          : "";
+      }
+
       const updatedStudent = await withBusy(`renewal-record-${renewalRecordStudent.student_id}`, () =>
-        updateStudent(renewalRecordStudent.student_id, {
-          requirements: renewalRecordDraft.initial_payout_requirements,
-          semester_records: nextSemesterRecords
-        })
+        updateStudent(renewalRecordStudent.student_id, updatePayload)
       );
 
       setStudents((current) =>
@@ -2729,6 +2770,17 @@ export function AppShell({
                 <Field label="Phone">
                   <input value={studentDraft.phone_number} onChange={(event) => patchStudentDraft({ phone_number: event.currentTarget.value })} />
                 </Field>
+                <div className="field full">
+                  <span>Renewal Status</span>
+                  <label className="document-check compact-check">
+                    <input
+                      type="checkbox"
+                      checked={studentDraft.renewed}
+                      onChange={(event) => patchStudentDraft({ renewed: event.currentTarget.checked })}
+                    />
+                    <span>For Renewal</span>
+                  </label>
+                </div>
                 <RequirementsChecklist
                   draft={studentDraft}
                   onRequirementChange={patchStudentRequirement}
@@ -3177,6 +3229,16 @@ export function AppShell({
                       { key: "name", label: "Student", render: (student) => student.full_name },
                       { key: "school", label: "School", render: (student) => student.school_address || "—" },
                       { key: "batch", label: "Batch", render: (student) => student.batch || "—" },
+                      {
+                        key: "for_renewal",
+                        label: "For Renewal",
+                        render: (student) => (
+                          <FlagPill
+                            active={isForRenewalStudent(student)}
+                            label={isForRenewalStudent(student) ? "For renewal" : "Initial"}
+                          />
+                        )
+                      },
                       {
                         key: "initial_payout_requirements",
                         label: "Initial Requirements",
@@ -4108,6 +4170,7 @@ export function AppShell({
                 <SummaryItem label="Year Level" value={studentDraft.year_level} />
                 <SummaryItem label="Batch" value={studentDraft.batch} />
                 <SummaryItem label="Phone" value={studentDraft.phone_number} />
+                <SummaryItem label="For Renewal" value={studentDraft.renewed ? "Yes" : "No"} />
                 <SummaryItem label="Requirements Ready" value={`${truthyDocumentLabels(studentDraft).length}/${requirementFields.length}`} />
               </div>
             </div>
@@ -4171,6 +4234,10 @@ export function AppShell({
                 <strong>{renewalRecordStudent.student_id}</strong>
               </div>
               <div>
+                <span>For Renewal</span>
+                <strong>{isForRenewalDraft(renewalRecordStudent, renewalRecordDraft) ? "Yes" : "No"}</strong>
+              </div>
+              <div>
                 <span>Profile Requirements</span>
                 <strong>{requirementCompletionCount(getStudentRequirements(renewalRecordStudent))}/{requirementFields.length}</strong>
               </div>
@@ -4198,6 +4265,26 @@ export function AppShell({
                 <span>School</span>
                 <strong>{renewalRecordStudent.school_address || "Not set"}</strong>
               </div>
+            </div>
+            <div className="dialog-history-panel">
+              <div className="dialog-history-header">
+                <span>Renewal Status</span>
+                <strong>{isForRenewalDraft(renewalRecordStudent, renewalRecordDraft) ? "Yes" : "No"}</strong>
+              </div>
+              {hasInitialPayroll(renewalRecordStudent) ? (
+                <div className="inline-warning">
+                  Payroll history already places this student in the renewal group.
+                </div>
+              ) : null}
+              <label className="document-check compact-check">
+                <input
+                  type="checkbox"
+                  checked={isForRenewalDraft(renewalRecordStudent, renewalRecordDraft)}
+                  disabled={hasInitialPayroll(renewalRecordStudent)}
+                  onChange={(event) => patchRenewalIndicator(event.currentTarget.checked)}
+                />
+                <span>For Renewal</span>
+              </label>
             </div>
             <div className="dialog-history-panel">
               <div className="dialog-history-header">
@@ -4243,7 +4330,7 @@ export function AppShell({
                   <button
                     type="button"
                     className="secondary-button compact"
-                    disabled={renewalRecordDraft.payout_type === "initial" || !hasInitialPayroll(renewalRecordStudent)}
+                    disabled={renewalRecordDraft.payout_type === "initial" || !isForRenewalDraft(renewalRecordStudent, renewalRecordDraft)}
                     onClick={() =>
                       setAllRenewalRequirements(
                         renewalRequirementCompletionCount(renewalRecordDraft.renewal_requirements) !== renewalRequirementFields.length
@@ -4256,17 +4343,11 @@ export function AppShell({
                   </button>
                 </div>
               </div>
-              {renewalRecordDraft.payout_type === "initial" ? (
+              {renewalRecordDraft.payout_type === "initial" || !isForRenewalDraft(renewalRecordStudent, renewalRecordDraft) ? (
                 <div className="inline-warning">
                   {isAdmin
-                    ? "Initial payout is selected, so renewal requirements are skipped for this first payroll."
+                    ? "Mark this student as for renewal before fulfilling renewal requirements."
                     : "Renewal requirements are skipped while this student is in the initial requirements cycle."}
-                </div>
-              ) : !hasInitialPayroll(renewalRecordStudent) ? (
-                <div className="inline-warning">
-                  {isAdmin
-                    ? "Initial payroll must be recorded before these renewal requirements can be fulfilled."
-                    : "Renewal requirements stay locked until the student's initial cycle is completed by an admin."}
                 </div>
               ) : null}
               <div className="document-grid">
@@ -4275,7 +4356,7 @@ export function AppShell({
                     <input
                       type="checkbox"
                       checked={renewalRecordDraft.renewal_requirements[field]}
-                      disabled={renewalRecordDraft.payout_type === "initial" || !hasInitialPayroll(renewalRecordStudent)}
+                      disabled={renewalRecordDraft.payout_type === "initial" || !isForRenewalDraft(renewalRecordStudent, renewalRecordDraft)}
                       onChange={(event) => patchRenewalRequirement(field, event.currentTarget.checked)}
                     />
                     <span>{RENEWAL_REQUIREMENT_LABELS[field]}</span>
