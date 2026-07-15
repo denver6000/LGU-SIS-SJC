@@ -18,6 +18,7 @@ import { getAdminDb } from "../firebase-admin";
 import { HttpError } from "../../shared/http";
 import {
   getStudentCyclePayoutType,
+  hasStudentPayrollRecord,
   isStudentForRenewal,
   isStudentInitialPayoutQualified,
   isStudentPayrolledForCycle,
@@ -39,7 +40,7 @@ type StudentPageFilters = {
   status?: string;
   cycle?: Pick<CurrentCycleConfig, "cycle_key" | "school_year" | "sem_number">;
   requirementsTab?: "not-renewal" | "renewal";
-  payrollTab?: "new" | "renewal";
+  payrollTab?: "all" | "new" | "renewal";
 };
 
 function normalizeBoolean(value: unknown) {
@@ -307,14 +308,19 @@ function canMutatePayrollState(actor?: SessionUser | null) {
 }
 
 function isRequirementsOnlyUpdate(input: StudentInput) {
-  const allowedFields = new Set<keyof StudentInput>(["requirements", "semester_records", "renewed", "renewed_at"]);
+  const allowedFields = new Set<keyof StudentInput>(["requirements", "semester_records", "payrolled", "payrolled_at"]);
   return Object.keys(input).every((key) => allowedFields.has(key as keyof StudentInput));
 }
 
 function preservePayrollFieldsForEncoder(input: StudentInput, existing: Student): StudentInput {
   const sanitized: StudentInput = { ...input };
-  delete sanitized.payrolled;
-  delete sanitized.payrolled_at;
+  delete sanitized.renewed;
+  delete sanitized.renewed_at;
+
+  if (hasStudentPayrollRecord(existing)) {
+    sanitized.payrolled = existing.payrolled;
+    sanitized.payrolled_at = existing.payrolled_at;
+  }
 
   if (Array.isArray(input.semester_records)) {
     const existingByCycle = new Map(
@@ -490,7 +496,7 @@ function matchesStudentFilters(student: Student, filters: StudentPageFilters) {
   if (filters.requirementsTab === "renewal" && !isStudentForRenewal(student)) return false;
   if (filters.requirementsTab === "not-renewal" && isStudentForRenewal(student)) return false;
 
-  if (filters.payrollTab) {
+  if (filters.payrollTab && filters.payrollTab !== "all") {
     const payoutType = filters.payrollTab === "renewal" ? "renewal" : "initial";
     if (!filters.cycle?.cycle_key) return false;
     if (getStudentCyclePayoutType(student, filters.cycle) !== payoutType) return false;

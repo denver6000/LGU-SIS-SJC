@@ -1,0 +1,30 @@
+<?php
+
+use App\Http\Controllers\AuthController;
+use App\Http\Controllers\StudentController;
+use App\Http\Controllers\RequirementsController;
+use App\Http\Controllers\PayrollController;
+use App\Http\Controllers\UserManagementController;
+use Illuminate\Support\Facades\Route;
+
+Route::middleware('guest')->group(function () {
+    Route::get('/login', [AuthController::class, 'create'])->name('login');
+    Route::post('/login', [AuthController::class, 'store'])->name('login.store');
+});
+
+Route::post('/logout', [AuthController::class, 'destroy'])->middleware('auth')->name('logout');
+
+Route::middleware(['auth', 'role:admin,encoder'])->group(function () {
+    Route::get('/', fn () => redirect()->route('students.index'))->name('dashboard');
+    Route::resource('students', StudentController::class)->only(['index', 'create', 'store', 'edit', 'update']);
+    Route::get('/requirements', [RequirementsController::class, 'index'])->name('requirements.index');
+    Route::get('/requirements/{studentCycle}/edit', [RequirementsController::class, 'edit'])->name('requirements.edit');
+    Route::put('/requirements/{studentCycle}', [RequirementsController::class, 'update'])->name('requirements.update');
+    Route::get('/payrolls', [PayrollController::class, 'index'])->name('payrolls.index');
+});
+
+Route::middleware(['auth', 'role:admin'])->prefix('users')->name('users.')->group(function () {
+    Route::get('/', [UserManagementController::class, 'index'])->name('index');
+    Route::get('/create', [UserManagementController::class, 'create'])->name('create');
+    Route::post('/', [UserManagementController::class, 'store'])->name('store');
+});

@@ -100,21 +100,21 @@ export class StudentModel {
   get permanentPayrolled() {
     return (
       this.topLevelPayrolled ||
-      this.semesterRecords.some(
-        (record) =>
-          record.payroll_status === "payrolled" ||
-          record.renewal_status === "payrolled" ||
-          Boolean(record.payroll_id || record.payrolled_at)
-      )
+      this.hasPayrollRecord
     );
   }
 
-  get forRenewal() {
-    return this.topLevelRenewed || this.permanentPayrolled;
+  get hasPayrollRecord() {
+    return this.semesterRecords.some(
+      (record) =>
+        record.payroll_status === "payrolled" ||
+        record.renewal_status === "payrolled" ||
+        Boolean(record.payroll_id || record.payrolled_at)
+    );
   }
 
   get lifecycle(): StudentPayoutType {
-    return this.forRenewal ? "renewal" : "initial";
+    return this.permanentPayrolled ? "renewal" : "initial";
   }
 
   get globalInitialRequirements() {
@@ -153,7 +153,7 @@ export class StudentModel {
   isQualifiedForPayrollCycle(cycle: Pick<CurrentCycleConfig, "cycle_key">) {
     if (this.isPayrolledForCycle(cycle)) return false;
     return this.cyclePayoutType(cycle) === "renewal"
-      ? this.forRenewal && this.cycleRenewalPayoutQualified(cycle)
+      ? this.permanentPayrolled && this.cycleRenewalPayoutQualified(cycle)
       : this.initialPayoutQualified;
   }
 
@@ -179,7 +179,7 @@ export class StudentModel {
     const status = this.cyclePayrollStatus(cycle);
     if (status === "payrolled") return "payrolled";
     if (this.cyclePayoutType(cycle) === "renewal") {
-      if (!this.forRenewal) return "not marked for renewal";
+      if (!this.permanentPayrolled) return "needs initial payroll";
       return this.cycleRenewalPayoutQualified(cycle)
         ? "renewal qualified"
         : "missing renewal requirements";
@@ -221,7 +221,11 @@ export function hasPermanentPayroll(student: StudentDocShape) {
 }
 
 export function isStudentForRenewal(student: StudentDocShape) {
-  return studentModel(student).forRenewal;
+  return studentModel(student).permanentPayrolled;
+}
+
+export function hasStudentPayrollRecord(student: StudentDocShape) {
+  return studentModel(student).hasPayrollRecord;
 }
 
 export function lifecyclePayoutType(student: StudentDocShape): StudentPayoutType {

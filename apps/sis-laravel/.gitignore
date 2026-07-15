@@ -1,0 +1,62 @@
+# Laravel dependencies
+/vendor/
+/node_modules/
+
+# Environment files and secrets
+/.env
+/.env.*
+!/.env.example
+!.env.example
+
+# Laravel runtime files
+/storage/app/*
+!/storage/app/.gitignore
+/storage/framework/cache/*
+!/storage/framework/cache/.gitignore
+/storage/framework/sessions/*
+!/storage/framework/sessions/.gitignore
+/storage/framework/testing/*
+!/storage/framework/testing/.gitignore
+/storage/framework/views/*
+!/storage/framework/views/.gitignore
+/storage/logs/*
+!/storage/logs/.gitignore
+/storage/*.key
+
+# Migration exports and local reports
+/storage/*migration*.json
+/storage/*migration*.log
+/storage/*import*.json
+/storage/*import*.log
+
+# Generated Laravel/Vite files
+/bootstrap/cache/*.php
+!/bootstrap/cache/.gitignore
+/public/build/
+/public/hot
+/public/storage
+
+# Local databases and database dumps
+/database/*.sqlite
+/database/*.sqlite-journal
+/database/*.db
+/database/*.dump
+/database/*.sql
+
+# Test and tool caches
+/.phpunit.result.cache
+/.php-cs-fixer.cache
+/.phpunit.cache/
+/.phpstan.cache/
+
+# IDE and operating-system files
+/.idea/
+/.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Local migration/debug output
+/scripts/*.log
+/scripts/*.json

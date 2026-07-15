@@ -27,9 +27,10 @@ export async function GET(request: Request) {
             return undefined;
           })(),
           payrollTab:
+            url.searchParams.get("payrollTab") === "all" ||
             url.searchParams.get("payrollTab") === "new" ||
             url.searchParams.get("payrollTab") === "renewal"
-              ? (url.searchParams.get("payrollTab") as "new" | "renewal")
+              ? (url.searchParams.get("payrollTab") as "all" | "new" | "renewal")
               : undefined,
           cycle: url.searchParams.get("cycleKey")
             ? {

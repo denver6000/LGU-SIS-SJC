@@ -1,0 +1,9 @@
+@extends('layouts.app')
+@section('content')
+<div class="page-heading"><div><p class="eyebrow">Requirements Timeline · {{ $studentCycle->academicCycle->label() }}</p><h1>{{ $studentCycle->student->full_name }}</h1><p class="muted">{{ ucfirst($tab) }} requirements are maintained separately from the student profile.</p></div></div>
+<form method="POST" action="{{ route('requirements.update', $studentCycle) }}" class="form-card stack">@csrf @method('PUT')<input type="hidden" name="tab" value="{{ $tab }}">
+<div class="form-section"><h2>Payout classification</h2><label>Type<select name="payout_classification"><option value="initial" @selected($studentCycle->payout_classification === 'initial')>Initial payout</option><option value="renewal" @selected($studentCycle->payout_classification === 'renewal')>Renewal payout</option></select></label></div>
+<div class="form-section"><h2>Manual payroll qualification</h2><div class="form-grid"><label>Qualification<select name="qualification_status"><option value="pending" @selected($studentCycle->qualification_status === 'pending')>Pending</option><option value="qualified" @selected($studentCycle->qualification_status === 'qualified')>Qualified</option><option value="excluded" @selected($studentCycle->qualification_status === 'excluded')>Excluded</option></select></label><label>Decision note<textarea name="qualification_note">{{ $studentCycle->qualification_note }}</textarea></label></div></div>
+<div class="form-section"><h2>{{ ucfirst($tab) }} requirements</h2><div class="requirement-grid">@foreach($fields as $field => $label)<label class="check"><input type="checkbox" name="{{ $field }}" value="1" @checked($studentCycle->requirements?->{$field})> {{ $label }}</label>@endforeach</div></div>
+<div><button class="primary-button" type="submit">Save requirements</button> <a href="{{ route('requirements.index', ['cycle_id' => $studentCycle->academic_cycle_id, 'tab' => $tab]) }}">Cancel</a></div></form>
+@endsection

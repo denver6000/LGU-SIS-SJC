@@ -65,7 +65,7 @@ export type StudentPageFilters = {
   batch?: string;
   status?: string;
   requirementsTab?: "not-renewal" | "renewal";
-  payrollTab?: "new" | "renewal";
+  payrollTab?: "all" | "new" | "renewal";
   cycle?: {
     cycle_key: string;
     school_year: string;
