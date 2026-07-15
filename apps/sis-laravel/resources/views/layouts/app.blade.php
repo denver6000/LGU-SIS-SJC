@@ -23,6 +23,7 @@
                 <a class="{{ request()->routeIs('students.*', 'dashboard') ? 'active' : '' }}" href="{{ route('students.index') }}"><span>▦</span> Students</a>
                 <a class="{{ request()->routeIs('requirements.*') ? 'active' : '' }}" href="{{ route('requirements.index') }}"><span>☷</span> Requirements</a>
                 <a class="{{ request()->routeIs('payrolls.*') ? 'active' : '' }}" href="{{ route('payrolls.index') }}"><span>₱</span> Payrolls</a>
+                <a class="{{ request()->routeIs('records.*') ? 'active' : '' }}" href="{{ route('records.index') }}"><span>▤</span> Records</a>
                 @if(auth()->user()->isAdmin())
                     <a class="{{ request()->routeIs('users.*') ? 'active' : '' }}" href="{{ route('users.index') }}"><span>♙</span> Users</a>
                 @endif

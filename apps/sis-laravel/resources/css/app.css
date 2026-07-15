@@ -44,6 +44,14 @@ a { color:var(--green); }
 .payroll-summary span { flex:1; padding:14px 16px; background:var(--surface); color:var(--text-soft); font-size:.8rem; }
 .payroll-summary strong { display:block; color:var(--green-deep); font-size:1.35rem; }
 .status-pill { display:inline-block; padding:4px 8px; color:var(--green-deep); background:var(--green-soft); border:1px solid #b9d6ae; border-radius:99px; font-size:.72rem; font-weight:700; }
+.records-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; }
+.record-panel { padding:0; overflow:hidden; }
+.record-panel-header { display:flex; align-items:flex-end; justify-content:space-between; gap:14px; padding:16px; border-bottom:1px solid var(--line); }
+.record-panel h2 { margin:0; font-size:1rem; } .record-panel p { margin:5px 0 0; font-size:.8rem; }
+.record-add-form { display:flex; gap:6px; } .record-add-form input { min-width:150px; }
+.record-panel table { margin:0; } .record-panel td,.record-panel th { padding:10px 16px; }
+.record-action { width:1%; white-space:nowrap; text-align:right; }
+.text-button { padding:0; color:#8b2d2d; background:transparent; border:0; cursor:pointer; font:inherit; font-size:.78rem; }
 .form-card { border-top:1px solid var(--line); }
 table { width:100%; border-collapse:collapse; }
 th,td { padding:12px 10px; border-bottom:1px solid var(--line); text-align:left; }
@@ -73,4 +81,4 @@ textarea { min-height:84px; resize:vertical; }
 .auth-card > .muted { margin:8px 0 24px; text-align:center; font-size:.9rem; }
 .rail-backdrop { display:none; }
 @media (max-width:920px) { .workspace-shell { grid-template-columns:1fr; } .menu-button { display:block; } .workspace-rail { position:fixed; left:-270px; width:248px; transition:left .2s ease; } .workspace-rail.open { left:0; } .rail-close { display:block; } .rail-backdrop { position:fixed; inset:0; background:rgb(28 39 30 / 35%); z-index:9; } .rail-backdrop.open { display:block; } }
-@media (max-width:760px) { .workspace-content { padding:12px; } .page-heading { align-items:flex-start; flex-direction:column; } .form-grid,.requirement-grid { grid-template-columns:1fr; } .timeline-toolbar { align-items:stretch; flex-direction:column; } .table-card { overflow-x:auto; } table { min-width:650px; } }
+@media (max-width:760px) { .workspace-content { padding:12px; } .page-heading { align-items:flex-start; flex-direction:column; } .form-grid,.requirement-grid,.records-grid { grid-template-columns:1fr; } .timeline-toolbar { align-items:stretch; flex-direction:column; } .record-panel-header { align-items:stretch; flex-direction:column; } .record-add-form input { min-width:0; } .table-card { overflow-x:auto; } table { min-width:650px; } }

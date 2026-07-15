@@ -5,6 +5,7 @@ use App\Http\Controllers\StudentController;
 use App\Http\Controllers\RequirementsController;
 use App\Http\Controllers\PayrollController;
 use App\Http\Controllers\UserManagementController;
+use App\Http\Controllers\RecordsController;
 use Illuminate\Support\Facades\Route;
 
 Route::middleware('guest')->group(function () {
@@ -21,6 +22,9 @@ Route::middleware(['auth', 'role:admin,encoder'])->group(function () {
     Route::get('/requirements/{studentCycle}/edit', [RequirementsController::class, 'edit'])->name('requirements.edit');
     Route::put('/requirements/{studentCycle}', [RequirementsController::class, 'update'])->name('requirements.update');
     Route::get('/payrolls', [PayrollController::class, 'index'])->name('payrolls.index');
+    Route::get('/records', [RecordsController::class, 'index'])->name('records.index');
+    Route::post('/records', [RecordsController::class, 'store'])->name('records.store');
+    Route::delete('/records/{sisOption}', [RecordsController::class, 'destroy'])->name('records.destroy');
 });
 
 Route::middleware(['auth', 'role:admin'])->prefix('users')->name('users.')->group(function () {

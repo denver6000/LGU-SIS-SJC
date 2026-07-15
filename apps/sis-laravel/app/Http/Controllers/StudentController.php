@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\AcademicCycle;
 use App\Models\Student;
+use App\Models\SisOption;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
 
@@ -16,7 +17,7 @@ class StudentController extends Controller
 
     public function create()
     {
-        return view('students.form', ['student' => new Student(), 'cycles' => $this->cycles(), 'selectedCycle' => null]);
+        return view('students.form', $this->formData(new Student(), null));
     }
 
     public function store(Request $request)
@@ -31,7 +32,7 @@ class StudentController extends Controller
     {
         $cycle = $student->cycles()->with(['academicCycle', 'requirements'])->find($request->integer('cycle_id'))
             ?? $student->cycles()->with(['academicCycle', 'requirements'])->latest()->first();
-        return view('students.form', ['student' => $student, 'cycles' => $this->cycles(), 'selectedCycle' => $cycle]);
+        return view('students.form', $this->formData($student, $cycle));
     }
 
     public function update(Request $request, Student $student)
@@ -43,6 +44,18 @@ class StudentController extends Controller
     }
 
     private function cycles() { return AcademicCycle::orderByDesc('school_year')->orderBy('semester_number')->get(); }
+
+    private function formData(Student $student, $selectedCycle): array
+    {
+        return [
+            'student' => $student,
+            'cycles' => $this->cycles(),
+            'selectedCycle' => $selectedCycle,
+            'barangays' => SisOption::where('collection_name', 'barangays')->orderBy('name')->pluck('name'),
+            'schools' => SisOption::where('collection_name', 'schools')->orderBy('name')->pluck('name'),
+            'batches' => SisOption::where('collection_name', 'batches')->orderBy('name')->pluck('name'),
+        ];
+    }
 
     private function validated(Request $request, bool $creating, ?Student $student = null): array
     {
