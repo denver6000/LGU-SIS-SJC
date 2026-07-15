@@ -36,6 +36,11 @@ jobs:
       - name: Install Composer dependencies
         run: composer install --no-interaction --prefer-dist --no-progress
 
+      - name: Configure application for tests
+        run: |
+          cp .env.example .env
+          php artisan key:generate --force
+
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
