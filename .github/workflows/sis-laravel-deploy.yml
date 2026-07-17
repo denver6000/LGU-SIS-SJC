@@ -95,7 +95,6 @@ jobs:
           username: ${{ secrets.HOSTINGER_SSH_USER }}
           port: ${{ secrets.HOSTINGER_SSH_PORT }}
           key: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
-          script_stop: true
           script: |
             set -e
             cd ~/domains/sjc-sis.dmballesteros.com/sis-laravel
