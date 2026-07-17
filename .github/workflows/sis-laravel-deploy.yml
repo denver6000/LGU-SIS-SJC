@@ -2,6 +2,13 @@ name: Deploy SIS Laravel to Hostinger
 
 on:
   workflow_dispatch:
+  workflow_run:
+    workflows:
+      - SIS Laravel CI
+    types:
+      - completed
+    branches:
+      - main
 
 permissions:
   contents: read
@@ -12,11 +19,14 @@ defaults:
 
 jobs:
   build:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
 
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
 
       - name: Set up PHP
         uses: shivammathur/setup-php@v2
@@ -48,17 +58,17 @@ jobs:
               --exclude='.env.*' \
               --exclude='node_modules' \
               --exclude='storage/logs/*' \
-              --exclude='release.tar.gz' \
-              -czf release.tar.gz .
+              -czf "$RUNNER_TEMP/release.tar.gz" .
 
       - name: Upload release archive
         uses: actions/upload-artifact@v4
         with:
           name: sis-laravel-release
-          path: apps/sis-laravel/release.tar.gz
+          path: ${{ runner.temp }}/release.tar.gz
           if-no-files-found: error
 
   deploy:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     needs: build
     runs-on: ubuntu-latest
 
