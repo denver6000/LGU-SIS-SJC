@@ -99,10 +99,13 @@ jobs:
             set -e
             cd ~/domains/sjc-sis.dmballesteros.com/sis-laravel
             test -f .env
+            PHP_BIN=/opt/alt/php84/usr/bin/php
+            test -x "$PHP_BIN"
+            "$PHP_BIN" -v
             tar -xzf release.tar.gz
             rm -f release.tar.gz
-            php artisan migrate --force
-            php artisan optimize:clear
-            php artisan config:cache
-            php artisan route:cache
-            php artisan view:cache
+            "$PHP_BIN" artisan migrate --force
+            "$PHP_BIN" artisan optimize:clear
+            "$PHP_BIN" artisan config:cache
+            "$PHP_BIN" artisan route:cache
+            "$PHP_BIN" artisan view:cache
