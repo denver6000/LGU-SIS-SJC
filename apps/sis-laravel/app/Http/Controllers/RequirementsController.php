@@ -27,11 +27,12 @@ class RequirementsController extends Controller
     {
         $cycles = AcademicCycle::orderByDesc('school_year')->orderBy('semester_number')->get();
         $cycle = $cycles->firstWhere('id', $request->integer('cycle_id')) ?? $cycles->first();
-        $tab = $request->string('tab')->value() === 'renewal' ? 'renewal' : 'initial';
+        $tab = in_array($request->string('tab')->value(), ['all', 'initial', 'renewal'], true) ? $request->string('tab')->value() : 'all';
 
         $studentCycles = StudentCycle::with(['student', 'requirements', 'academicCycle'])
             ->when($cycle, fn ($query) => $query->where('academic_cycle_id', $cycle->id))
-            ->where('payout_classification', $tab)
+            ->when($tab === 'initial', fn ($query) => $query->whereHas('student', fn ($students) => $students->where('payout_track', 'initial')))
+            ->when($tab === 'renewal', fn ($query) => $query->whereHas('student', fn ($students) => $students->where('payout_track', 'renewal')))
             ->when($request->filled('name'), fn ($query) => $query->whereHas('student', fn ($students) => $students->where('full_name', 'like', '%'.$request->string('name')->value().'%')))
             ->when($request->filled('barangay'), fn ($query) => $query->whereHas('student', fn ($students) => $students->where('barangay', 'like', '%'.$request->string('barangay')->value().'%')))
             ->get();
@@ -53,19 +54,18 @@ class RequirementsController extends Controller
         $tab = $request->string('tab')->value() === 'renewal' ? 'renewal' : 'initial';
         $fields = $tab === 'renewal' ? self::RENEWAL_FIELDS : self::INITIAL_FIELDS;
         $data = $request->validate(array_merge(
-            ['payout_classification' => ['required', 'in:initial,renewal']],
-            ['qualification_status' => ['required', 'in:pending,qualified,excluded'], 'qualification_note' => ['nullable', 'string']],
+            ['payroll_qualified' => ['nullable', 'boolean']],
+            ['qualification_note' => ['nullable', 'string']],
             collect($fields)->mapWithKeys(fn ($label, $field) => [$field => ['nullable', 'boolean']])->all(),
         ));
         $studentCycle->update([
-            'payout_classification' => $data['payout_classification'],
-            'qualification_status' => $data['qualification_status'],
+            'payroll_qualified' => $request->boolean('payroll_qualified'),
             'qualification_note' => $data['qualification_note'] ?? null,
             'qualification_decided_by' => $request->user()->id,
             'qualification_decided_at' => now(),
         ]);
         $studentCycle->requirements()->updateOrCreate([], collect($fields)->mapWithKeys(fn ($label, $field) => [$field => (bool) ($data[$field] ?? false)])->merge(['updated_by' => $request->user()->id])->all());
 
-        return redirect()->route('requirements.index', ['cycle_id' => $studentCycle->academic_cycle_id, 'tab' => $data['payout_classification']])->with('success', 'Requirements updated.');
+        return redirect()->route('requirements.index', ['cycle_id' => $studentCycle->academic_cycle_id, 'tab' => $request->string('return_tab')->value() ?: 'all'])->with('success', 'Requirements updated.');
     }
 }

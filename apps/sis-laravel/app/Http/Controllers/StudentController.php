@@ -61,14 +61,14 @@ class StudentController extends Controller
     {
         $rules = [
             'student_id' => ['required', 'string', 'max:50', Rule::unique('students', 'student_id')->ignore($student?->id)],
-            'full_name' => ['required', 'string', 'max:255'], 'student_number' => ['nullable', 'string', 'max:100'],
+            'full_name' => ['required', 'string', 'max:255'], 'payout_track' => ['required', 'in:initial,renewal'], 'student_number' => ['nullable', 'string', 'max:100'],
             'barangay' => ['nullable', 'string', 'max:255'], 'address' => ['nullable', 'string'],
             'phone_number' => ['nullable', 'string', 'max:50'], 'cycle_id' => ['required', 'exists:academic_cycles,id'],
             'school' => ['nullable', 'string', 'max:255'], 'course' => ['nullable', 'string', 'max:255'],
             'year_level' => ['nullable', 'string', 'max:50'], 'batch' => ['nullable', 'string', 'max:50'],
         ];
         $data = $request->validate($rules);
-        $studentData = collect($data)->only(['student_id', 'full_name', 'student_number', 'barangay', 'address', 'phone_number'])->all();
+        $studentData = collect($data)->only(['student_id', 'full_name', 'payout_track', 'student_number', 'barangay', 'address', 'phone_number'])->all();
         $cycleData = collect($data)->only(['cycle_id', 'school', 'course', 'year_level', 'batch'])->all();
         return [$studentData, $cycleData];
     }
@@ -78,8 +78,6 @@ class StudentController extends Controller
         $cycle = $student->cycles()->updateOrCreate(
             ['academic_cycle_id' => $cycleData['cycle_id']],
             collect($cycleData)->except('cycle_id')->merge([
-                'payout_classification' => $student->cycles()->where('academic_cycle_id', $cycleData['cycle_id'])->exists() ? null : 'initial',
-                'qualification_status' => $student->cycles()->where('academic_cycle_id', $cycleData['cycle_id'])->exists() ? null : 'pending',
                 'qualification_decided_by' => $request->user()->id,
                 'qualification_decided_at' => now(),
             ])->filter(fn ($value) => $value !== null)->all(),

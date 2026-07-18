@@ -7,6 +7,7 @@
 <div class="form-section"><h2>Student information</h2><div class="form-grid">
 <label>Student ID<input name="student_id" value="{{ old('student_id', $student->student_id) }}" required></label>
 <label>Full name<input name="full_name" value="{{ old('full_name', $student->full_name) }}" required></label>
+<label>Payout track<select name="payout_track" required><option value="initial" @selected(old('payout_track', $student->payout_track ?: 'initial') === 'initial')>Initial payout</option><option value="renewal" @selected(old('payout_track', $student->payout_track) === 'renewal')>Renewal payout</option></select></label>
 <label>Student number<input name="student_number" value="{{ old('student_number', $student->student_number) }}"></label>
 <label>Phone number<input name="phone_number" value="{{ old('phone_number', $student->phone_number) }}"></label>
 <label>Barangay<select name="barangay"><option value="">Select barangay</option>@foreach($barangays as $barangay)<option value="{{ $barangay }}" @selected(old('barangay', $student->barangay) === $barangay)>{{ $barangay }}</option>@endforeach</select></label>

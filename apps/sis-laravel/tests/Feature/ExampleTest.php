@@ -45,9 +45,8 @@ class ExampleTest extends TestCase
         $this->actingAs($user)->post('/students', [
             'student_id' => 'STU001',
             'full_name' => 'Test Student',
+            'payout_track' => 'initial',
             'cycle_id' => $cycle->id,
-            'payout_classification' => 'initial',
-            'qualification_status' => 'pending',
             'initial_certificate_of_residency' => '1',
         ])->assertRedirectToRoute('students.index');
 
@@ -57,10 +56,10 @@ class ExampleTest extends TestCase
         $studentCycle = Student::where('student_id', 'STU001')->firstOrFail()->cycles()->firstOrFail();
         $this->actingAs($user)->put("/requirements/{$studentCycle->id}", [
             'tab' => 'initial',
-            'payout_classification' => 'initial',
-            'qualification_status' => 'pending',
+            'payroll_qualified' => '1',
             'initial_certificate_of_residency' => '1',
-        ])->assertRedirectToRoute('requirements.index', ['cycle_id' => $cycle->id, 'tab' => 'initial']);
+            'return_tab' => 'all',
+        ])->assertRedirectToRoute('requirements.index', ['cycle_id' => $cycle->id, 'tab' => 'all']);
 
         $this->assertDatabaseHas('student_cycle_requirements', [
             'initial_certificate_of_residency' => true,
@@ -72,11 +71,10 @@ class ExampleTest extends TestCase
     {
         $user = User::factory()->create(['role' => 'admin', 'is_active' => true]);
         $cycle = AcademicCycle::create(['school_year' => '2026-2027', 'semester_number' => 1, 'status' => 'open']);
-        $student = Student::create(['student_id' => 'READY001', 'full_name' => 'Ready Student']);
+        $student = Student::create(['student_id' => 'READY001', 'full_name' => 'Ready Student', 'payout_track' => 'renewal']);
         $studentCycle = $student->cycles()->create([
             'academic_cycle_id' => $cycle->id,
-            'payout_classification' => 'renewal',
-            'qualification_status' => 'qualified',
+            'payroll_qualified' => true,
         ]);
         $studentCycle->requirements()->create([
             'renewal_liquidation' => true,

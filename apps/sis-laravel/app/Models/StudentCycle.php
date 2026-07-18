@@ -19,31 +19,39 @@ class StudentCycle extends Model
 
     protected $fillable = [
         'student_id', 'academic_cycle_id', 'school', 'course', 'year_level', 'batch',
-        'payout_classification', 'qualification_status', 'qualification_note',
+        'payroll_qualified', 'qualification_note',
         'qualification_decided_by', 'qualification_decided_at',
     ];
 
-    protected function casts(): array { return ['qualification_decided_at' => 'datetime']; }
+    protected function casts(): array
+    {
+        return ['payroll_qualified' => 'boolean', 'qualification_decided_at' => 'datetime'];
+    }
     public function student(): BelongsTo { return $this->belongsTo(Student::class); }
     public function academicCycle(): BelongsTo { return $this->belongsTo(AcademicCycle::class); }
     public function requirements(): HasOne { return $this->hasOne(StudentCycleRequirement::class); }
     public function decidedBy(): BelongsTo { return $this->belongsTo(User::class, 'qualification_decided_by'); }
 
-    public function requiredRequirementFields(): array
+    public function requiredRequirementFields(string $type): array
     {
-        return $this->payout_classification === 'renewal' ? self::RENEWAL_REQUIREMENTS : self::INITIAL_REQUIREMENTS;
+        return $type === 'renewal' ? self::RENEWAL_REQUIREMENTS : self::INITIAL_REQUIREMENTS;
     }
 
-    public function requirementProgress(): array
+    public function requirementProgress(string $type): array
     {
-        $fields = $this->requiredRequirementFields();
+        $fields = $this->requiredRequirementFields($type);
         $complete = collect($fields)->filter(fn (string $field) => (bool) $this->requirements?->{$field})->count();
         return ['complete' => $complete, 'total' => count($fields)];
     }
 
-    public function isReadyForPayroll(): bool
+    public function isPayrollQualified(): bool
     {
-        $progress = $this->requirementProgress();
-        return $this->qualification_status === 'qualified' && $progress['complete'] === $progress['total'];
+        return $this->payroll_qualified;
+    }
+
+    public function isReadyForPayroll(string $type): bool
+    {
+        $progress = $this->requirementProgress($type);
+        return $this->isPayrollQualified() && $progress['complete'] === $progress['total'];
     }
 }

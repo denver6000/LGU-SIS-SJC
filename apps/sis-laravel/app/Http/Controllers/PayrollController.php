@@ -18,12 +18,12 @@ class PayrollController extends Controller
 
         $qualifiedCycles = StudentCycle::with(['student', 'requirements', 'academicCycle'])
             ->when($cycle, fn ($query) => $query->where('academic_cycle_id', $cycle->id))
-            ->where('qualification_status', 'qualified')
-            ->when($type !== 'all', fn ($query) => $query->where('payout_classification', $type))
+            ->where('payroll_qualified', true)
+            ->when($type !== 'all', fn ($query) => $query->whereHas('student', fn ($students) => $students->where('payout_track', $type)))
             ->orderBy('id')
             ->get();
 
-        $payrollRows = $qualifiedCycles->filter(fn (StudentCycle $studentCycle) => $studentCycle->isReadyForPayroll());
+        $payrollRows = $qualifiedCycles->filter(fn (StudentCycle $studentCycle) => $studentCycle->isReadyForPayroll($studentCycle->student->payout_track));
 
         return view('payrolls.index', compact('cycles', 'cycle', 'type', 'payrollRows', 'qualifiedCycles'));
     }
