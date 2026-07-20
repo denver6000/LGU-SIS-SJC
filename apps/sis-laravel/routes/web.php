@@ -8,6 +8,7 @@ use App\Http\Controllers\UserManagementController;
 use App\Http\Controllers\RecordsController;
 use App\Http\Controllers\ActivityLogController;
 use App\Http\Controllers\StudentHistoryController;
+use App\Http\Controllers\ProfileController;
 use Illuminate\Support\Facades\Route;
 
 Route::middleware('guest')->group(function () {
@@ -30,6 +31,8 @@ Route::middleware(['auth', 'role:admin,encoder'])->group(function () {
     Route::get('/records', [RecordsController::class, 'index'])->name('records.index');
     Route::post('/records', [RecordsController::class, 'store'])->name('records.store');
     Route::delete('/records/{sisOption}', [RecordsController::class, 'destroy'])->name('records.destroy');
+    Route::get('/profile', [ProfileController::class, 'edit'])->name('profile.edit');
+    Route::put('/profile', [ProfileController::class, 'update'])->name('profile.update');
 });
 
 Route::middleware(['auth', 'role:admin'])->group(function () {
@@ -44,4 +47,6 @@ Route::middleware(['auth', 'role:admin'])->prefix('users')->name('users.')->grou
     Route::get('/', [UserManagementController::class, 'index'])->name('index');
     Route::get('/create', [UserManagementController::class, 'create'])->name('create');
     Route::post('/', [UserManagementController::class, 'store'])->name('store');
+    Route::get('/{user}/edit', [UserManagementController::class, 'edit'])->name('edit');
+    Route::put('/{user}', [UserManagementController::class, 'update'])->name('update');
 });
