@@ -28,6 +28,7 @@
                 <a class="{{ request()->routeIs('records.*') ? 'active' : '' }}" href="{{ route('records.index') }}"><span>▤</span> Records</a>
                 @if(auth()->user()->isAdmin())
                     <a class="{{ request()->routeIs('users.*') ? 'active' : '' }}" href="{{ route('users.index') }}"><span>♙</span> Users</a>
+                    <a class="{{ request()->routeIs('activity.*') ? 'active' : '' }}" href="{{ route('activity.index') }}"><span>◷</span> Activity</a>
                 @endif
             </nav>
             <div class="rail-program"><img src="{{ asset('assets/logo_with_mayor_name.jpg') }}" alt="Scholarship program"><span>Scholarship Program</span></div>

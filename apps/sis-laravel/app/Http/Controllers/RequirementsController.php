@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\AcademicCycle;
 use App\Models\Student;
 use App\Models\StudentCycle;
+use App\Models\StudentHistory;
 use Illuminate\Http\Request;
 
 class RequirementsController extends Controller
@@ -84,6 +85,15 @@ class RequirementsController extends Controller
         $studentCycle->loadMissing('student');
         $payoutTrack = $request->input('payout_track', $studentCycle->student->payout_track);
         $request->merge(['payout_track' => $payoutTrack]);
+        $studentCycle->loadMissing('requirements', 'academicCycle');
+        $oldValues = [
+            'payout_track' => $studentCycle->student->payout_track,
+            'payroll_qualified' => (bool) $studentCycle->payroll_qualified,
+            'requirements' => [],
+        ];
+        foreach (array_keys(self::INITIAL_FIELDS + self::RENEWAL_FIELDS) as $field) {
+            $oldValues['requirements'][$field] = (bool) $studentCycle->requirements?->{$field};
+        }
         $data = $request->validate(array_merge(
             ['payout_track' => ['required', 'in:initial,renewal']],
             ['payroll_qualified' => ['nullable', 'boolean']],
@@ -100,6 +110,25 @@ class RequirementsController extends Controller
             'qualification_decided_at' => now(),
         ]);
         $studentCycle->requirements()->updateOrCreate([], collect($fields)->mapWithKeys(fn ($label, $field) => [$field => (bool) ($data[$field] ?? false)])->merge(['updated_by' => $request->user()->id])->all());
+        $studentCycle->load('requirements', 'academicCycle', 'student');
+        $newValues = [
+            'payout_track' => $studentCycle->student->payout_track,
+            'payroll_qualified' => (bool) $studentCycle->payroll_qualified,
+            'requirements' => [],
+        ];
+        foreach (array_keys(self::INITIAL_FIELDS + self::RENEWAL_FIELDS) as $field) {
+            $newValues['requirements'][$field] = (bool) $studentCycle->requirements?->{$field};
+        }
+        StudentHistory::create([
+            'student_id' => $studentCycle->student_id,
+            'user_id' => $request->user()->id,
+            'academic_cycle_id' => $studentCycle->academic_cycle_id,
+            'history_type' => 'requirements',
+            'action' => 'updated',
+            'summary' => 'Requirements and qualification updated for '.$studentCycle->academicCycle->label().'.',
+            'old_values' => $oldValues,
+            'new_values' => $newValues,
+        ]);
 
         return redirect()->route('requirements.index', ['cycle_id' => $studentCycle->academic_cycle_id, 'tab' => $request->string('return_tab')->value() ?: 'all'])->with('success', 'Requirements updated.');
     }

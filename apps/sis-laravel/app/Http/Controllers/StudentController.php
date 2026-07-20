@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\AcademicCycle;
 use App\Models\Student;
 use App\Models\SisOption;
+use App\Models\StudentHistory;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
 
@@ -24,7 +25,19 @@ class StudentController extends Controller
     {
         [$studentData, $cycleData] = $this->validated($request, true);
         $student = Student::create($studentData);
-        $this->saveCycle($student, $cycleData, $request);
+        $cycle = $this->saveCycle($student, $cycleData, $request);
+        if (filled($cycle->year_level)) {
+            StudentHistory::create([
+                'student_id' => $student->id,
+                'user_id' => $request->user()->id,
+                'academic_cycle_id' => $cycle->academic_cycle_id,
+                'history_type' => 'year-level',
+                'action' => 'created',
+                'summary' => 'Initial year level recorded for '.$cycle->academicCycle->label().'.',
+                'old_values' => ['year_level' => null],
+                'new_values' => ['year_level' => $cycle->year_level],
+            ]);
+        }
         return redirect()->route('students.index')->with('success', 'Student added.');
     }
 
@@ -38,8 +51,22 @@ class StudentController extends Controller
     public function update(Request $request, Student $student)
     {
         [$studentData, $cycleData] = $this->validated($request, false, $student);
+        $previousCycle = $student->cycles()->where('academic_cycle_id', $cycleData['cycle_id'])->first();
         $student->update($studentData);
-        $this->saveCycle($student, $cycleData, $request);
+        $cycle = $this->saveCycle($student, $cycleData, $request);
+        $previousYearLevel = $previousCycle?->year_level;
+        if ($previousYearLevel !== $cycle->year_level && (filled($previousYearLevel) || filled($cycle->year_level))) {
+            StudentHistory::create([
+                'student_id' => $student->id,
+                'user_id' => $request->user()->id,
+                'academic_cycle_id' => $cycle->academic_cycle_id,
+                'history_type' => 'year-level',
+                'action' => 'updated',
+                'summary' => 'Year level changed for '.$cycle->academicCycle->label().'.',
+                'old_values' => ['year_level' => $previousYearLevel],
+                'new_values' => ['year_level' => $cycle->year_level],
+            ]);
+        }
         return redirect()->route('students.index')->with('success', 'Student updated.');
     }
 
@@ -74,9 +101,9 @@ class StudentController extends Controller
         return [$studentData, $cycleData];
     }
 
-    private function saveCycle(Student $student, array $cycleData, Request $request): void
+    private function saveCycle(Student $student, array $cycleData, Request $request)
     {
-        $cycle = $student->cycles()->updateOrCreate(
+        return $student->cycles()->with('academicCycle')->updateOrCreate(
             ['academic_cycle_id' => $cycleData['cycle_id']],
             collect($cycleData)->except('cycle_id')->merge([
                 'qualification_decided_by' => $request->user()->id,

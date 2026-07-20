@@ -10,4 +10,5 @@ class Student extends Model
     protected $fillable = ['student_id', 'full_name', 'payout_track', 'student_number', 'barangay', 'address', 'phone_number'];
 
     public function cycles(): HasMany { return $this->hasMany(StudentCycle::class); }
+    public function history(): HasMany { return $this->hasMany(StudentHistory::class); }
 }
