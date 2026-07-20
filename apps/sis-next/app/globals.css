@@ -938,6 +938,10 @@ table {
   margin: 0;
 }
 
+.document-check.compact-check {
+  min-height: 44px;
+}
+
 .document-check span {
   line-height: 1.25;
   text-transform: capitalize;
@@ -1446,6 +1450,26 @@ table {
   color: var(--blue);
 }
 
+.payroll-scope-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, max-content));
+  gap: 18px 28px;
+  align-items: end;
+}
+
+.payroll-scope-group {
+  display: grid;
+  gap: 8px;
+  align-content: start;
+}
+
+.payroll-scope-label {
+  font-size: 0.78rem;
+  font-weight: 800;
+  color: var(--text-soft);
+  text-transform: uppercase;
+}
+
 .button-stack {
   display: grid;
   gap: 12px;
@@ -1471,7 +1495,9 @@ table {
 
 .table-shell {
   width: 100%;
-  overflow-x: auto;
+  max-height: calc(44px + (64px * 10));
+  overflow: auto;
+  overscroll-behavior: contain;
   border: 1px solid var(--line);
   background: #ffffff;
 }
@@ -1506,6 +1532,13 @@ table {
 
 .data-table tbody tr:hover td {
   background: #fbfcfe;
+}
+
+.data-table tbody tr.virtual-spacer-row td,
+.data-table tbody tr.virtual-spacer-row:hover td {
+  padding: 0;
+  border-bottom: 0;
+  background: transparent;
 }
 
 .empty-state {
@@ -1609,6 +1642,7 @@ table {
   .document-grid,
   .split-panels,
   .requirements-filter-grid,
+  .payroll-scope-grid,
   .student-summary-grid,
   .action-dialog-summary,
   .history-row,
@@ -1672,5 +1706,15 @@ table {
   .surface-header,
   .stat-tile {
     padding: 16px;
+  }
+
+  .payroll-scope-grid .segmented-control {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+  }
+
+  .payroll-scope-grid .segmented-control button {
+    padding: 0 10px;
   }
 }

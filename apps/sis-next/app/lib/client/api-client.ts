@@ -32,6 +32,11 @@ async function request<T>(input: RequestInfo | URL, init?: RequestInit) {
 export type AppInitialData = {
   user: SessionUser;
   currentCycle: CurrentCycleConfig;
+  stats: {
+    studentsTotal: number;
+    claimed: number;
+    payrollCandidates: number;
+  };
   students: Student[];
   trash: Student[];
   payoutRecords: PayoutRecord[];
@@ -50,6 +55,22 @@ export type StudentPage = {
   nextCursor: string | null;
   hasMore: boolean;
   limit: number;
+  total: number;
+};
+
+export type StudentPageFilters = {
+  query?: string;
+  school?: string;
+  barangay?: string;
+  batch?: string;
+  status?: string;
+  requirementsTab?: "not-renewal" | "renewal";
+  payrollTab?: "all" | "new" | "renewal";
+  cycle?: {
+    cycle_key: string;
+    school_year: string;
+    sem_number: number;
+  };
 };
 
 export function getCurrentCycleConfig() {
@@ -73,14 +94,28 @@ export function getStudents() {
 
 export function getStudentPage({
   cursor,
-  limit = 75
+  limit = 75,
+  filters
 }: {
   cursor?: string | null;
   limit?: number;
+  filters?: StudentPageFilters;
 } = {}) {
   const params = new URLSearchParams();
   params.set("limit", String(limit));
   if (cursor) params.set("cursor", cursor);
+  if (filters?.query) params.set("query", filters.query);
+  if (filters?.school) params.set("school", filters.school);
+  if (filters?.barangay) params.set("barangay", filters.barangay);
+  if (filters?.batch && filters.batch !== "all") params.set("batch", filters.batch);
+  if (filters?.status && filters.status !== "all") params.set("status", filters.status);
+  if (filters?.requirementsTab) params.set("requirementsTab", filters.requirementsTab);
+  if (filters?.payrollTab) params.set("payrollTab", filters.payrollTab);
+  if (filters?.cycle?.cycle_key) {
+    params.set("cycleKey", filters.cycle.cycle_key);
+    params.set("schoolYear", filters.cycle.school_year);
+    params.set("semNumber", String(filters.cycle.sem_number));
+  }
 
   return request<StudentPage>(`/api/students?${params.toString()}`);
 }

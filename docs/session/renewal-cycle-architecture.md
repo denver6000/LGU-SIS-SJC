@@ -1,7 +1,7 @@
 # Renewal Cycle Architecture
 
-Last updated: 2026-06-02
-Implementation checkpoint: 2026-06-02
+Last updated: 2026-06-19
+Implementation checkpoint: 2026-06-19
 
 This note records the recommended implementation model for scholarship renewals, school-year changes, semester limits, and payroll linkage. It exists because renewal state is not a permanent student property. Renewals are per semester and per school year, so the data model must track time-bound participation instead of relying on a single `student.renewed` boolean.
 
@@ -92,12 +92,49 @@ Current requirements implementation:
 - Semester selection is intentionally a two-semester spinner. The UI should not expose 3rd or 4th semester choices unless the real program policy changes.
 - Initial payout requirements are a six-item map: Certificate of Residency, Pagpapatunay Form, Picture of the House, Good Moral Certificate, Original Certificate of Grades, and Proof of Enrollment.
 - Renewal requirements are a separate three-item map: Liquidation, Proof of Enrollment, and Latest Grades.
-- Payroll qualification is derived, not manually selected. The system should not expose a user-editable `renewal_status` selector.
+- Requirement completion and payroll selection are separate concepts. Requirements may produce an informational qualification state, but payroll inclusion is an explicit user decision for the relevant cycle.
 - Each semester record has internal `payout_type: "initial" | "renewal"`. Do not expose this as a user-facing control. Newly registered/no-initial-payroll students should default to `initial`, which protects them from being required to submit renewal requirements on their first payroll.
 - Initial payout qualification means the six initial payout requirements are complete.
 - Renewal payroll qualification means the student has an initial payroll recorded and the three semester renewal requirements are complete. These requirements prove the student is still enrolled.
 - `students/{studentId}.semester_records[]` currently stores both maps directly on the semester record:
 - Requirement maps are semester-separated. A new semester starts with empty maps; it must not automatically inherit checks from the Registry tab or another semester. Legacy records may be normalized from old global fields only as migration compatibility.
+
+## Current Bridge Philosophy: For Renewal
+
+The current bridge implementation has one important lifecycle rule:
+
+> A student becomes a renewal student after their initial payout is considered complete.
+
+In normal operation, this happens through `/payrolls`. A newly registered student starts as an initial-payout student. Once the office generates the initial payout payroll, the payroll flow writes:
+
+- `student.payrolled: true`
+- `student.payrolled_at`
+- a semester record with `payroll_status: "payrolled"`
+- payroll trace fields such as `payroll_id`, `payroll_record_type`, `payrolled_at`, `payrolled_by_uid`, and `payrolled_by_email`
+- a `payrollRecords` document
+
+The UI then treats that student as renewal-eligible in later cycles. The source of truth for this broad renewal eligibility is the initial-payout marker, currently represented by top-level `student.payrolled` / `student.payrolled_at`, plus compatibility checks for payrolled semester records.
+
+Do not use `student.renewed` as the lifecycle source of truth. It is legacy/import/audit data. It may still appear in old records and history views, but Requirements and Payroll qualification must not depend on it.
+
+### Manual For Renewal Toggle
+
+Some students are entered into the Registry after they have already received their initial payout outside this app. For those cases, the Register Student and Requirements Management "For Renewal" checkbox intentionally reuses the existing lifecycle marker:
+
+- checked means set top-level `student.payrolled: true` and `student.payrolled_at`
+- unchecked means clear the top-level compatibility marker only when there is no actual payroll history
+
+This is not meant to fabricate a payroll document event. The manual toggle must not create `payrollRecords`, must not add `payroll_id`, and must not create or erase a semester record that says `payroll_status: "payrolled"`.
+
+If a student already has an actual payrolled semester record, that history wins. The manual toggle should display as enabled/true because the student is renewal-eligible, but it must be locked from undoing that generated payroll history. Generated payroll events are document/audit events, not casual profile flags.
+
+In short:
+
+- `student.payrolled/payrolled_at`: broad "initial payout already happened" compatibility marker.
+- payrolled `semester_records[]`: cycle-specific generated payroll evidence.
+- `payrollRecords`: document-generation trace.
+- `student.renewed`: legacy/audit compatibility only.
+- "For Renewal" UI: a controlled way to set the same initial-payout marker for students entered after their initial payout already happened.
 
 ```ts
 {
@@ -109,7 +146,7 @@ Current requirements implementation:
   // Legacy compatibility only. New code should derive from payroll_status and requirements.
   renewal_status: "pending",
   payroll_id: "",
-  payroll_record_type: "", // initial_payout_payroll | renewal_payroll
+  payroll_record_type: "", // payroll; payout_type remains the initial/renewal classification
   payrolled_at: "",
   payrolled_by_uid: "",
   payrolled_by_email: "",
@@ -137,10 +174,10 @@ Current requirements implementation:
 
 - Renewal requirements must stay locked until the student has an initial payroll flag. In the bridge implementation, that means `student.payrolled === true` or at least one semester record with `payroll_status: "payrolled"`.
 - The current Payrolls tab consumes requirement-qualified students for the selected school year/semester. It should list students who are qualified and not yet payrolled for that exact cycle.
-- `/payrolls` separates those candidates into `New` for initial payout and `Renewal` for renewal payout.
+- `/payrolls` uses one payroll preparation workflow. Initial and renewal are classifications/filters, not separate payroll systems, and one payroll can contain both classifications.
 - Initial payout candidates qualify from the six initial requirements and do not need renewal requirements when they have no initial payroll yet.
 - Renewal candidates qualify from initial payroll existence plus the three renewal requirements.
-- Payroll generation should write `payroll_status: "payrolled"` for that semester, store `payroll_id`, `payroll_record_type`, `payrolled_at`, and payrolling admin fields on the student doc's semester record, and save the trace as `initial_payout_payroll` or `renewal_payroll` based on the cycle record's internal payout type.
+- Payroll generation uses one workflow for both initial and renewal students. It writes `payroll_status: "payrolled"`, stores `payroll_id`, `payroll_record_type: "payroll"`, `payrolled_at`, and payrolling admin fields on the cycle record. The cycle's `payout_type` remains classification metadata.
 - `school_id` is a legacy field only. Do not add it back to the active six-item initial payout checklist unless the product owner explicitly changes the requirement list.
 
 This is a practical bridge toward the fuller cycle model. In the future, per-cycle year level should live on `cycles/{cycleKey}/studentCycles/{studentId}`, but the current student-level history remains useful as an audit trail for pre-cycle migration edits.
@@ -222,7 +259,7 @@ Current implementation note:
 
 ## Payroll Linkage
 
-Payroll generation should consume current-cycle requirement/qualification records, not `student.renewed`.
+Payroll generation should consume current-cycle requirement/selection records, not `student.renewed`. Initial and renewal students use the same payroll document workflow.
 
 When creating payroll:
 
@@ -232,7 +269,7 @@ When creating payroll:
 - update the current-cycle semester/cycle record with `payroll_status: "payrolled"` and `payroll_id`
 - set `student.payrolled: true` only as the broad compatibility flag that initial payroll exists
 
-Payrolls are government document events. Do not allow Records actions or manual toggles to mutate payroll state.
+Payrolls are government document events. Do not allow Records actions or manual toggles to mutate generated payroll evidence such as `payrollRecords`, `payroll_id`, `payroll_record_type`, or payrolled semester records. A manual "For Renewal" toggle may only set or clear the broad top-level initial-payout marker when no generated payroll history exists.
 
 ## UI Communication
 

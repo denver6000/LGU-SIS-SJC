@@ -15,12 +15,27 @@ import {
   UserRoundPlus,
   X
 } from "lucide-react";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { updateEmail, updatePassword, updateProfile } from "firebase/auth";
 import { useAuth } from "./auth-provider";
 import { firebaseAuth } from "./lib/firebase-client";
-import { buildStudentTimelineDebugRows, hasPermanentPayroll, lifecyclePayoutType } from "./lib/models/student";
+import {
+  buildStudentTimelineDebugRows,
+  getStudentCyclePayrollStatus,
+  getStudentCyclePayoutType,
+  getStudentInitialPayoutRequirements,
+  getStudentSemesterRecordForCycle,
+  hasPermanentPayroll,
+  hasStudentPayrollRecord,
+  isStudentForRenewal,
+  isStudentInitialPayoutQualified,
+  isStudentPayrolledForCycle,
+  isStudentPayrollCandidateForCycle,
+  isStudentQualifiedForPayrollCycle,
+  studentPayrollQualificationLabel
+} from "./lib/models/student";
 import { APP_VIEWS, isAdminOnlyView, labelForView, routeForView, type AppViewName } from "./lib/shared/views";
 import {
   createManagedUser,
@@ -90,6 +105,7 @@ type StudentDraft = {
   school_course: string;
   year_level: string;
   batch: string;
+  for_renewal: boolean;
   requirements: StudentRequirementMap;
 };
 
@@ -116,14 +132,15 @@ type CurrentCycleDraft = {
 
 type RenewalRecordDraft = {
   payout_type: StudentSemesterRecord["payout_type"];
+  for_renewal: boolean;
   initial_payout_requirements: StudentRequirementMap;
   renewal_requirements: StudentRenewalRequirementMap;
   notes: string;
 };
 
 type PayrollMetadataDraft = PayrollExportMetadata;
-type RequirementsTab = "non-payrolled" | "payrolled";
-type PayrollTab = "new" | "renewal";
+type RequirementsTab = "not-renewal" | "renewal";
+type PayrollTab = "all" | "new" | "renewal";
 type StudentLoadState = "idle" | "loading" | "loading-more" | "ready" | "error";
 type ConfirmationRequest = {
   title: string;
@@ -144,6 +161,7 @@ const adminRecordStatusFilters = new Set(["renewed", "unrenewed", "payrolled", "
 const lazyStudentViews = new Set<AppViewName>(["register", "requirements", "records"]);
 const studentBackedViews = new Set<AppViewName>(["dashboard", "register", "requirements", "records", "payrolls"]);
 const studentPageSize = 75;
+const dataTableEstimatedRowSize = 64;
 
 type PersistedShellState = {
   version: 3;
@@ -300,6 +318,7 @@ function emptyStudentDraft(): StudentDraft {
     school_course: "",
     year_level: "",
     batch: "",
+    for_renewal: false,
     requirements: emptyRequirementMap()
   };
 }
@@ -360,6 +379,7 @@ function generateSchoolYearOptions(anchorSchoolYear: string) {
 function emptyRenewalRecordDraft(): RenewalRecordDraft {
   return {
     payout_type: "initial",
+    for_renewal: false,
     initial_payout_requirements: emptyRequirementMap(),
     renewal_requirements: emptyRenewalRequirementMap(),
     notes: ""
@@ -477,11 +497,11 @@ function getSemesterRecords(student: Student) {
 }
 
 function getSemesterRecordForCycle(student: Student, currentCycle: CurrentCycleConfig) {
-  return getSemesterRecords(student).find((record) => record.cycle_key === currentCycle.cycle_key) || null;
+  return getStudentSemesterRecordForCycle(student, currentCycle);
 }
 
 function getInitialPayoutRequirements(student: Student) {
-  return getStudentRequirements(student);
+  return getStudentInitialPayoutRequirements(student);
 }
 
 function getSemesterRenewalRequirements(record: StudentSemesterRecord | null) {
@@ -492,21 +512,29 @@ function hasInitialPayroll(student: Student) {
   return hasPermanentPayroll(student);
 }
 
+function hasLockedPayrollHistory(student: Student) {
+  return hasStudentPayrollRecord(student);
+}
+
+function isForRenewalStudent(student: Student) {
+  return isStudentForRenewal(student);
+}
+
+function isForRenewalDraft(student: Student, draft: RenewalRecordDraft) {
+  return hasLockedPayrollHistory(student) || draft.for_renewal;
+}
+
 function getSemesterPayoutType(student: Student, record: StudentSemesterRecord | null): StudentSemesterRecord["payout_type"] {
-  const lifecycle = lifecyclePayoutType(student);
-  if (lifecycle === "renewal") return "renewal";
   if (record?.payout_type === "initial" || record?.payout_type === "renewal") return record.payout_type;
-  return "initial";
+  return isForRenewalStudent(student) ? "renewal" : "initial";
 }
 
 function getSemesterPayrollStatus(student: Student, cycle: CurrentCycleConfig): StudentSemesterRecord["payroll_status"] {
-  const record = getSemesterRecordForCycle(student, cycle);
-  if (getSemesterPayrollStatusFromRecord(record) === "payrolled") return "payrolled";
-  return isQualifiedForPayroll(student, cycle) ? "qualified" : "not_qualified";
+  return getStudentCyclePayrollStatus(student, cycle);
 }
 
 function isInitialPayoutQualified(student: Student) {
-  return requirementCompletionCount(getInitialPayoutRequirements(student)) === requirementFields.length;
+  return isStudentInitialPayoutQualified(student);
 }
 
 function isRenewalPayoutQualified(record: StudentSemesterRecord | null) {
@@ -514,48 +542,33 @@ function isRenewalPayoutQualified(record: StudentSemesterRecord | null) {
 }
 
 function isQualifiedForPayroll(student: Student, cycle: CurrentCycleConfig) {
-  const record = getSemesterRecordForCycle(student, cycle);
-  if (getSemesterPayrollStatusFromRecord(record) === "payrolled") return false;
-  return getSemesterPayoutType(student, record) === "renewal"
-    ? hasInitialPayroll(student) && isRenewalPayoutQualified(record)
-    : isInitialPayoutQualified(student);
+  return isStudentQualifiedForPayrollCycle(student, cycle);
 }
 
 function isPayrollCandidateForCycle(student: Student, cycle: CurrentCycleConfig) {
-  return !isPayrolledForCycle(student, cycle) && isQualifiedForPayroll(student, cycle);
+  return isStudentPayrollCandidateForCycle(student, cycle);
 }
 
 function isPayoutTypeForCycle(student: Student, cycle: CurrentCycleConfig, payoutType: StudentSemesterRecord["payout_type"]) {
-  const record = getSemesterRecordForCycle(student, cycle);
-  return getSemesterPayoutType(student, record) === payoutType;
+  return getStudentCyclePayoutType(student, cycle) === payoutType;
 }
 
-function payoutRecordTypeForCycle(student: Student, cycle: CurrentCycleConfig) {
-  const record = getSemesterRecordForCycle(student, cycle);
-  return getSemesterPayoutType(student, record) === "renewal" ? "renewal_payroll" : "initial_payout_payroll";
+function payoutRecordTypeForCycle(_student: Student, _cycle: CurrentCycleConfig) {
+  return "payroll";
 }
 
 function payoutTypeLabelForCycle(student: Student, cycle: CurrentCycleConfig) {
-  const record = getSemesterRecordForCycle(student, cycle);
-  return getSemesterPayoutType(student, record) === "renewal" ? "Renewal" : "Initial payout";
+  return getStudentCyclePayoutType(student, cycle) === "renewal" ? "Renewal" : "Initial payout";
 }
 
 function getSemesterPayrollStatusFromRecord(record: StudentSemesterRecord | null): StudentSemesterRecord["payroll_status"] {
-  if (record?.payroll_status) return record.payroll_status;
+  if (record?.payroll_status === "payrolled") return "payrolled";
   if (record?.renewal_status === "payrolled") return "payrolled";
-  if (record?.renewal_status === "renewed") return "qualified";
   return "not_qualified";
 }
 
 function qualificationLabel(student: Student, cycle: CurrentCycleConfig) {
-  const record = getSemesterRecordForCycle(student, cycle);
-  const status = getSemesterPayrollStatus(student, cycle);
-  if (status === "payrolled") return "payrolled";
-  if (getSemesterPayoutType(student, record) === "renewal") {
-    if (!hasInitialPayroll(student)) return "needs initial payroll";
-    return isRenewalPayoutQualified(record) ? "renewal qualified" : "missing renewal requirements";
-  }
-  return isInitialPayoutQualified(student) ? "initial payout qualified" : "missing initial requirements";
+  return studentPayrollQualificationLabel(student, cycle);
 }
 
 function payrollStatusForDraft(student: Student, existingRecord: StudentSemesterRecord | null, draft: RenewalRecordDraft) {
@@ -563,7 +576,7 @@ function payrollStatusForDraft(student: Student, existingRecord: StudentSemester
   const initialComplete = requirementCompletionCount(draft.initial_payout_requirements) === requirementFields.length;
   const renewalComplete = renewalRequirementCompletionCount(draft.renewal_requirements) === renewalRequirementFields.length;
   return draft.payout_type === "renewal"
-    ? hasInitialPayroll(student) && renewalComplete
+    ? isForRenewalDraft(student, draft) && renewalComplete
       ? "qualified"
       : "not_qualified"
     : initialComplete
@@ -575,7 +588,7 @@ function qualificationLabelForDraft(student: Student, existingRecord: StudentSem
   const status = payrollStatusForDraft(student, existingRecord, draft);
   if (status === "payrolled") return "payrolled";
   if (draft.payout_type === "renewal") {
-    if (!hasInitialPayroll(student)) return "needs initial payroll";
+    if (!isForRenewalDraft(student, draft)) return "needs initial payroll";
     return status === "qualified" ? "renewal qualified" : "missing renewal requirements";
   }
   return status === "qualified" ? "initial payout qualified" : "missing initial requirements";
@@ -583,10 +596,11 @@ function qualificationLabelForDraft(student: Student, existingRecord: StudentSem
 
 function legacyRenewalStatusForPayrollStatus(
   student: Student,
-  payrollStatus: StudentSemesterRecord["payroll_status"]
+  payrollStatus: StudentSemesterRecord["payroll_status"],
+  forRenewal = isForRenewalStudent(student)
 ): NonNullable<StudentSemesterRecord["renewal_status"]> {
   if (payrollStatus === "payrolled") return "payrolled";
-  if (payrollStatus === "qualified" && hasInitialPayroll(student)) return "renewed";
+  if (payrollStatus === "qualified" && forRenewal) return "renewed";
   return "pending";
 }
 
@@ -606,7 +620,7 @@ function buildSemesterRecordForCycle(
     cycle_key: currentCycle.cycle_key,
     payout_type: draft.payout_type,
     payroll_status: payrollStatus,
-    renewal_status: legacyRenewalStatusForPayrollStatus(student, payrollStatus),
+    renewal_status: legacyRenewalStatusForPayrollStatus(student, payrollStatus, isForRenewalDraft(student, draft)),
     initial_payout_requirements: draft.initial_payout_requirements,
     renewal_requirements: draft.renewal_requirements,
     requirements: draft.renewal_requirements,
@@ -634,6 +648,11 @@ function semesterLabel(config: Pick<CurrentCycleConfig, "school_year" | "sem_num
   const suffix =
     config.sem_number === 1 ? "1st" : config.sem_number === 2 ? "2nd" : config.sem_number === 3 ? "3rd" : `${config.sem_number}th`;
   return `${config.school_year}, ${suffix} Semester`;
+}
+
+function loadedOfTotalText(loadedCount: number, totalCount: number, singularNoun: string) {
+  const total = Math.max(totalCount, loadedCount);
+  return `${loadedCount} ${singularNoun}${loadedCount === 1 ? "" : "s"} loaded of ${total} total`;
 }
 
 function isRenewedForCycle(student: Student, currentCycle: CurrentCycleConfig) {
@@ -798,7 +817,9 @@ function hasAnyInitialRequirement(requirements: StudentRequirementMap) {
 }
 
 function studentDraftFromAny(value: unknown): StudentDraft {
-  const source = value && typeof value === "object" ? (value as Partial<StudentDraft> & Partial<Record<StudentRequirementKey, unknown>>) : {};
+  const source = value && typeof value === "object"
+    ? (value as Partial<StudentDraft> & Partial<Student> & Partial<Record<StudentRequirementKey, unknown>>)
+    : {};
   return {
     student_id: String(source.student_id ?? "").trim(),
     full_name: String(source.full_name ?? "").trim(),
@@ -810,6 +831,7 @@ function studentDraftFromAny(value: unknown): StudentDraft {
     school_course: String(source.school_course ?? "").trim(),
     year_level: String(source.year_level ?? "").trim(),
     batch: String(source.batch ?? "").trim(),
+    for_renewal: source.for_renewal === true || source.payrolled === true || Boolean(source.payrolled_at),
     requirements: requirementMapFromLegacySource({
       ...source.requirements,
       certificate_of_residency: source.requirements?.certificate_of_residency ?? source.certificate_of_residency,
@@ -830,7 +852,6 @@ export function AppShell({
   initialView: AppViewName;
 }) {
   const { user, refreshSession, signOutUser } = useAuth();
-  const router = useRouter();
   const pathname = usePathname();
   const currentUser = user || initialData.user;
   const isAdmin = isAdminUser(currentUser);
@@ -850,7 +871,9 @@ export function AppShell({
   const [studentPageCursor, setStudentPageCursor] = useState<string | null>(null);
   const [studentHasMore, setStudentHasMore] = useState(false);
   const [studentLoadError, setStudentLoadError] = useState("");
+  const [studentTotalCount, setStudentTotalCount] = useState(initialData.stats.studentsTotal);
   const studentLoadRequestRef = useRef(0);
+  const studentPageFilterKeyRef = useRef("");
   const [trash, setTrash] = useState<Student[]>(initialData.trash);
   const [payoutRecords, setPayoutRecords] = useState<PayoutRecord[]>(initialData.payoutRecords);
   const [operationLogs, setOperationLogs] = useState<OperationLog[]>(initialData.operationLogs);
@@ -864,7 +887,7 @@ export function AppShell({
   const [renewalRecordDraft, setRenewalRecordDraft] = useState<RenewalRecordDraft>(() => emptyRenewalRecordDraft());
   const [requirementsSchoolYear, setRequirementsSchoolYear] = useState(initialData.currentCycle.school_year);
   const [requirementsSemester, setRequirementsSemester] = useState(String(initialData.currentCycle.sem_number));
-  const [requirementsTab, setRequirementsTab] = useState<RequirementsTab>("non-payrolled");
+  const [requirementsTab, setRequirementsTab] = useState<RequirementsTab>("not-renewal");
   const [requirementsNameFilter, setRequirementsNameFilter] = useState("");
   const [requirementsSchoolFilter, setRequirementsSchoolFilter] = useState("");
   const [requirementsBarangayFilter, setRequirementsBarangayFilter] = useState("");
@@ -878,13 +901,13 @@ export function AppShell({
   const [managedUserEditId, setManagedUserEditId] = useState<string | null>(null);
   const [profileDraft, setProfileDraft] = useState<ProfileDraft>(() => profileDraftFromUser(initialData.user));
   const [selectedPayrollIds, setSelectedPayrollIds] = useState<Set<string>>(() => new Set());
-  const [payrollTab, setPayrollTab] = useState<PayrollTab>("new");
+  const [payrollTab, setPayrollTab] = useState<PayrollTab>("all");
   const [payrollSchoolYear, setPayrollSchoolYear] = useState(initialData.currentCycle.school_year);
   const [payrollSemester, setPayrollSemester] = useState(String(initialData.currentCycle.sem_number));
   const [payrollNameFilter, setPayrollNameFilter] = useState("");
   const [payrollSchoolFilter, setPayrollSchoolFilter] = useState("");
   const [payrollBarangayFilter, setPayrollBarangayFilter] = useState("");
-  const [payrollStatusFilter, setPayrollStatusFilter] = useState("all");
+  const [payrollStatusFilter, setPayrollStatusFilter] = useState("payroll_candidates");
   const [payrollBatchFilter, setPayrollBatchFilter] = useState("all");
   const [payrollMetadataDraft, setPayrollMetadataDraft] = useState<PayrollMetadataDraft>(() => emptyPayrollMetadataDraft());
   const [payrollHistoryStudentId, setPayrollHistoryStudentId] = useState("");
@@ -925,13 +948,6 @@ export function AppShell({
   }, [currentUser.email, currentUser.name, currentUser.uid]);
 
   useEffect(() => {
-    for (const item of visibleNavItems) {
-      if (lazyStudentViews.has(item.view)) continue;
-      router.prefetch(routeForView(item.view));
-    }
-  }, [router, visibleNavItems]);
-
-  useEffect(() => {
     if (typeof window === "undefined") return;
 
     try {
@@ -953,7 +969,7 @@ export function AppShell({
         renewalRecordDraft?: Partial<RenewalRecordDraft>;
         requirementsSchoolYear?: string;
         requirementsSemester?: string;
-        requirementsTab?: RequirementsTab;
+        requirementsTab?: RequirementsTab | "non-payrolled" | "payrolled";
         requirementsNameFilter?: string;
         requirementsSchoolFilter?: string;
         requirementsBarangayFilter?: string;
@@ -1010,8 +1026,10 @@ export function AppShell({
         }
       }
       if (state.renewalRecordDraft) {
+        const renewalDraftState = state.renewalRecordDraft as Partial<RenewalRecordDraft> & { renewed?: boolean };
         setRenewalRecordDraft({
           payout_type: state.renewalRecordDraft.payout_type === "renewal" ? "renewal" : "initial",
+          for_renewal: renewalDraftState.for_renewal === true || renewalDraftState.renewed === true,
           initial_payout_requirements: requirementMapFromLegacySource(state.renewalRecordDraft.initial_payout_requirements),
           renewal_requirements: renewalRequirementMapFromAny(
             state.renewalRecordDraft.renewal_requirements ?? (state.renewalRecordDraft as { requirements?: unknown }).requirements
@@ -1021,15 +1039,19 @@ export function AppShell({
       }
       if (typeof state.requirementsSchoolYear === "string") setRequirementsSchoolYear(state.requirementsSchoolYear);
       if (typeof state.requirementsSemester === "string") setRequirementsSemester(state.requirementsSemester);
-      if (state.requirementsTab === "payrolled" || state.requirementsTab === "non-payrolled") {
+      if (state.requirementsTab === "renewal" || state.requirementsTab === "not-renewal") {
         setRequirementsTab(state.requirementsTab);
+      } else if (state.requirementsTab === "payrolled") {
+        setRequirementsTab("renewal");
+      } else if (state.requirementsTab === "non-payrolled") {
+        setRequirementsTab("not-renewal");
       }
       if (typeof state.requirementsNameFilter === "string") setRequirementsNameFilter(state.requirementsNameFilter);
       if (typeof state.requirementsSchoolFilter === "string") setRequirementsSchoolFilter(state.requirementsSchoolFilter);
       if (typeof state.requirementsBarangayFilter === "string") setRequirementsBarangayFilter(state.requirementsBarangayFilter);
       if (typeof state.requirementsBatchFilter === "string") setRequirementsBatchFilter(state.requirementsBatchFilter);
       if (Array.isArray(state.selectedPayrollIds)) setSelectedPayrollIds(new Set(state.selectedPayrollIds));
-      if (state.payrollTab === "new" || state.payrollTab === "renewal") {
+      if (state.payrollTab === "all" || state.payrollTab === "new" || state.payrollTab === "renewal") {
         setPayrollTab(state.payrollTab);
       } else if (state.payrollTab === "renewed") {
         setPayrollTab("renewal");
@@ -1041,7 +1063,13 @@ export function AppShell({
       if (typeof state.payrollNameFilter === "string") setPayrollNameFilter(state.payrollNameFilter);
       if (typeof state.payrollSchoolFilter === "string") setPayrollSchoolFilter(state.payrollSchoolFilter);
       if (typeof state.payrollBarangayFilter === "string") setPayrollBarangayFilter(state.payrollBarangayFilter);
-      if (typeof state.payrollStatusFilter === "string") setPayrollStatusFilter(state.payrollStatusFilter);
+      if (typeof state.payrollStatusFilter === "string") {
+        setPayrollStatusFilter(
+          state.payrollStatusFilter === "payrolled"
+            ? "payrolled"
+            : "payroll_candidates"
+        );
+      }
       if (typeof state.payrollBatchFilter === "string") setPayrollBatchFilter(state.payrollBatchFilter);
       if (state.payrollMetadataDraft) {
         setPayrollMetadataDraft({ ...emptyPayrollMetadataDraft(), ...state.payrollMetadataDraft });
@@ -1222,13 +1250,6 @@ export function AppShell({
   }, [isAdmin]);
 
   useEffect(() => {
-    if (!studentBackedViews.has(activeView)) return;
-    if (students.length || studentLoadState !== "idle") return;
-
-    loadStudentsPage({ reset: true }).catch(() => undefined);
-  }, [activeView, studentLoadState, students.length]);
-
-  useEffect(() => {
     if (activeView !== "users" || !isAdmin || usersLoaded) return;
 
     listManagedUsers()
@@ -1249,9 +1270,9 @@ export function AppShell({
 
   useEffect(() => {
     if (isAdminOnlyView(activeView) && !isAdmin) {
-      router.replace(routeForView("dashboard"));
+      window.location.replace(routeForView("dashboard"));
     }
-  }, [activeView, isAdmin, router]);
+  }, [activeView, isAdmin]);
 
   const batchOptions = useMemo(() => {
     const batches = new Set(options.batches.map((item) => item.name).filter(Boolean));
@@ -1329,6 +1350,11 @@ export function AppShell({
     () => students.find((student) => student.student_id === actionsStudentId) || null,
     [actionsStudentId, students]
   );
+  const studentEditRecord = useMemo(
+    () => students.find((student) => student.student_id === studentEditId) || null,
+    [studentEditId, students]
+  );
+  const studentRenewalLocked = Boolean(studentEditRecord && hasLockedPayrollHistory(studentEditRecord));
   const renewalRecordStudent = useMemo(
     () => students.find((student) => student.student_id === renewalRecordStudentId) || null,
     [renewalRecordStudentId, students]
@@ -1352,6 +1378,95 @@ export function AppShell({
     () => cycleConfigFromParts(payrollSchoolYear || currentCycle.school_year, payrollSemesterNumber),
     [currentCycle.school_year, payrollSchoolYear, payrollSemesterNumber]
   );
+  const activeStudentPageFilters = useMemo(() => {
+    if (activeView === "requirements") {
+      return {
+        query: requirementsNameFilter.trim(),
+        school: requirementsSchoolFilter.trim(),
+        barangay: requirementsBarangayFilter.trim(),
+        batch: requirementsBatchFilter,
+        requirementsTab: isAdmin ? requirementsTab : undefined,
+        cycle: {
+          cycle_key: requirementsCycle.cycle_key,
+          school_year: requirementsCycle.school_year,
+          sem_number: requirementsCycle.sem_number
+        }
+      };
+    }
+
+    if (activeView === "payrolls") {
+      return {
+        query: payrollNameFilter.trim(),
+        school: payrollSchoolFilter.trim(),
+        barangay: payrollBarangayFilter.trim(),
+        batch: payrollBatchFilter,
+        status: payrollStatusFilter,
+        payrollTab,
+        cycle: {
+          cycle_key: payrollCycle.cycle_key,
+          school_year: payrollCycle.school_year,
+          sem_number: payrollCycle.sem_number
+        }
+      };
+    }
+
+    if (activeView === "register" || activeView === "records") {
+      return {
+        query: search.trim(),
+        school: studentSchoolFilter.trim(),
+        barangay: studentBarangayFilter.trim(),
+        batch: batchFilter,
+        status: statusFilter,
+        cycle: {
+          cycle_key: currentCycle.cycle_key,
+          school_year: currentCycle.school_year,
+          sem_number: currentCycle.sem_number
+        }
+      };
+    }
+
+    return {};
+  }, [
+    activeView,
+    batchFilter,
+    currentCycle.cycle_key,
+    currentCycle.school_year,
+    currentCycle.sem_number,
+    isAdmin,
+    payrollBarangayFilter,
+    payrollBatchFilter,
+    payrollCycle,
+    payrollNameFilter,
+    payrollSchoolFilter,
+    payrollStatusFilter,
+    payrollTab,
+    requirementsBarangayFilter,
+    requirementsBatchFilter,
+    requirementsCycle,
+    requirementsNameFilter,
+    requirementsSchoolFilter,
+    requirementsTab,
+    search,
+    statusFilter,
+    studentBarangayFilter,
+    studentSchoolFilter
+  ]);
+  const activeStudentPageFilterKey = useMemo(
+    () => JSON.stringify(activeStudentPageFilters),
+    [activeStudentPageFilters]
+  );
+
+  useEffect(() => {
+    if (!studentBackedViews.has(activeView)) return;
+    if (studentPageFilterKeyRef.current === activeStudentPageFilterKey && students.length) return;
+
+    const timeoutId = window.setTimeout(() => {
+      void loadStudentsPage({ reset: true });
+    }, 250);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [activeView, activeStudentPageFilterKey, students.length]);
+
   const requirementRows = useMemo(() => {
     const nameFilter = requirementsNameFilter.trim().toLocaleLowerCase();
     const schoolFilter = requirementsSchoolFilter.trim().toLocaleLowerCase();
@@ -1368,9 +1483,9 @@ export function AppShell({
       return true;
     });
     const rows = isAdmin
-      ? requirementsTab === "payrolled"
-        ? cycleFilteredStudents.filter((student) => isPayrolledForCycle(student, requirementsCycle))
-        : cycleFilteredStudents.filter((student) => !isPayrolledForCycle(student, requirementsCycle))
+      ? requirementsTab === "renewal"
+        ? cycleFilteredStudents.filter((student) => isForRenewalStudent(student))
+        : cycleFilteredStudents.filter((student) => !isForRenewalStudent(student))
       : cycleFilteredStudents;
 
     return rows.slice().sort(comparePayrollStudents);
@@ -1432,9 +1547,12 @@ export function AppShell({
   }, [payrollBarangayFilter, payrollBatchFilter, payrollNameFilter, payrollSchoolFilter, students]);
 
   const payrollRows = useMemo(() => {
-    const payoutType = payrollTab === "renewal" ? "renewal" : "initial";
     const rows = payrollFilteredStudents.filter((student) => {
-      if (!isPayoutTypeForCycle(student, payrollCycle, payoutType)) return false;
+      if (payrollTab !== "all") {
+        const payoutType = payrollTab === "renewal" ? "renewal" : "initial";
+        if (!isPayoutTypeForCycle(student, payrollCycle, payoutType)) return false;
+      }
+      if (payrollStatusFilter === "payroll_candidates") return isPayrollCandidateForCycle(student, payrollCycle);
       if (payrollStatusFilter === "payrolled") return isPayrolledForCycle(student, payrollCycle);
       if (payrollStatusFilter === "unpayrolled") return !isPayrolledForCycle(student, payrollCycle);
       if (payrollStatusFilter === "not_qualified") {
@@ -1485,13 +1603,13 @@ export function AppShell({
 
   const stats = useMemo(
     () => ({
-      total: students.length,
-      claimed: students.filter((student) => student.claimed).length,
-      renewedPending: students.filter((student) => isPayrollCandidateForCycle(student, currentCycle)).length,
+      total: initialData.stats.studentsTotal,
+      claimed: initialData.stats.claimed,
+      renewedPending: initialData.stats.payrollCandidates,
       trash: trash.length,
       payrollRecords: payoutRecords.length
     }),
-    [currentCycle, payoutRecords.length, students, trash]
+    [initialData.stats.claimed, initialData.stats.payrollCandidates, initialData.stats.studentsTotal, payoutRecords.length, trash.length]
   );
 
   function showNotice(message: string, type: "success" | "error" | "info" = "success") {
@@ -1591,24 +1709,41 @@ export function AppShell({
   }
 
   async function loadStudentsPage({ reset = false }: { reset?: boolean } = {}) {
-    if (studentLoadState === "loading" || studentLoadState === "loading-more") return;
+    const requestFilters = activeStudentPageFilters;
+    const requestFilterKey = activeStudentPageFilterKey;
+    if (
+      (studentLoadState === "loading" || studentLoadState === "loading-more") &&
+      studentPageFilterKeyRef.current === requestFilterKey
+    ) {
+      return;
+    }
 
+    const resetPage = reset || studentPageFilterKeyRef.current !== requestFilterKey;
     const requestId = studentLoadRequestRef.current + 1;
     studentLoadRequestRef.current = requestId;
+    studentPageFilterKeyRef.current = requestFilterKey;
     setStudentLoadError("");
-    setStudentLoadState(reset || !students.length ? "loading" : "loading-more");
+    setStudentLoadState(resetPage || !students.length ? "loading" : "loading-more");
+    if (resetPage) {
+      setStudents([]);
+      setStudentPageCursor(null);
+      setStudentHasMore(false);
+      setStudentTotalCount(0);
+    }
 
     try {
       const page = await getStudentPage({
-        cursor: reset ? null : studentPageCursor,
-        limit: studentPageSize
+        cursor: resetPage ? null : studentPageCursor,
+        limit: studentPageSize,
+        filters: requestFilters
       });
 
       if (studentLoadRequestRef.current !== requestId) return;
 
-      setStudents((current) => mergeStudentRecords(current, page.students, reset));
+      setStudents((current) => mergeStudentRecords(current, page.students, resetPage));
       setStudentPageCursor(page.nextCursor);
       setStudentHasMore(page.hasMore);
+      setStudentTotalCount(page.total);
       setStudentLoadState("ready");
     } catch (error) {
       if (studentLoadRequestRef.current !== requestId) return;
@@ -1623,7 +1758,7 @@ export function AppShell({
     persistShellStateSnapshot(overrides);
     setActiveView(view);
     setSidebarOpen(false);
-    router.push(routeForView(view));
+    window.location.assign(routeForView(view));
   }
 
   async function handleSignOut() {
@@ -1735,6 +1870,15 @@ export function AppShell({
     }));
   }
 
+  function patchRenewalIndicator(checked: boolean) {
+    setRenewalRecordDraft((current) => ({
+      ...current,
+      for_renewal: checked,
+      payout_type: checked ? "renewal" : "initial",
+      renewal_requirements: checked ? current.renewal_requirements : emptyRenewalRequirementMap()
+    }));
+  }
+
   function selectPayrollHistoryStudent(student: Student) {
     setPayrollHistoryStudentId(student.student_id);
     setPayrollHistoryQuery(`${student.full_name} (${student.student_id})`);
@@ -1753,6 +1897,7 @@ export function AppShell({
       school_course: student.school_course || "",
       year_level: student.year_level || "",
       batch: student.batch || "",
+      for_renewal: isForRenewalStudent(student),
       requirements: getStudentRequirements(student)
     };
 
@@ -1778,6 +1923,7 @@ export function AppShell({
       currentRecord
         ? {
             payout_type: getSemesterPayoutType(student, currentRecord),
+            for_renewal: isForRenewalStudent(student),
             initial_payout_requirements: getInitialPayoutRequirements(student),
             renewal_requirements: getSemesterRenewalRequirements(currentRecord),
             notes: currentRecord.notes || ""
@@ -1785,7 +1931,8 @@ export function AppShell({
         : {
             ...emptyRenewalRecordDraft(),
             initial_payout_requirements: getInitialPayoutRequirements(student),
-            payout_type: hasInitialPayroll(student) ? "renewal" : "initial"
+            for_renewal: isForRenewalStudent(student),
+            payout_type: isForRenewalStudent(student) ? "renewal" : "initial"
           }
     );
   }
@@ -1796,12 +1943,38 @@ export function AppShell({
     setRenewalRecordDraft(emptyRenewalRecordDraft());
   }
 
+  function studentInputFromDraft(draft: StudentDraft, existingStudent: Student | null) {
+    const input: Student = {
+      student_id: draft.student_id,
+      full_name: draft.full_name,
+      student_number: draft.student_number,
+      barangay: draft.barangay,
+      address: draft.address,
+      school_address: draft.school_address,
+      phone_number: draft.phone_number,
+      school_course: draft.school_course,
+      year_level: draft.year_level,
+      batch: draft.batch,
+      requirements: draft.requirements
+    };
+
+    if (!existingStudent || !hasLockedPayrollHistory(existingStudent)) {
+      input.payrolled = draft.for_renewal;
+      input.payrolled_at = draft.for_renewal
+        ? existingStudent?.payrolled_at || new Date().toISOString()
+        : "";
+    }
+
+    return input;
+  }
+
   async function commitStudentSubmit() {
     if (studentEditId && !isAdmin) return;
 
     try {
+      const studentInput = studentInputFromDraft(studentDraft, studentEditRecord);
       const savedStudent = await withBusy("student-submit", () =>
-        studentEditId ? updateStudent(studentEditId, studentDraft) : createStudent(studentDraft)
+        studentEditId ? updateStudent(studentEditId, studentInput) : createStudent(studentInput)
       );
 
       setStudents((current) => {
@@ -1897,11 +2070,11 @@ export function AppShell({
   async function handleSaveRenewalRecord() {
     if (!renewalRecordStudent) return;
 
-    if (!hasInitialPayroll(renewalRecordStudent) && renewalRequirementCompletionCount(renewalRecordDraft.renewal_requirements) > 0) {
+    if (!isForRenewalDraft(renewalRecordStudent, renewalRecordDraft) && renewalRequirementCompletionCount(renewalRecordDraft.renewal_requirements) > 0) {
       showValidationDialog({
-        title: "Complete Initial Payroll First",
-        message: "Initial payroll must be recorded before renewal requirements can be fulfilled.",
-        fields: ["Initial Payroll"],
+        title: "Mark Student For Renewal",
+        message: "Mark this student as for renewal before fulfilling renewal requirements.",
+        fields: ["For Renewal"],
         acknowledgeLabel: "Review Record"
       });
       return;
@@ -1922,11 +2095,20 @@ export function AppShell({
     if (!confirmed) return;
 
     try {
+      const updatePayload: Parameters<typeof updateStudent>[1] = {
+        requirements: renewalRecordDraft.initial_payout_requirements,
+        semester_records: nextSemesterRecords
+      };
+
+      if (!hasLockedPayrollHistory(renewalRecordStudent)) {
+        updatePayload.payrolled = renewalRecordDraft.for_renewal;
+        updatePayload.payrolled_at = renewalRecordDraft.for_renewal
+          ? renewalRecordStudent.payrolled_at || new Date().toISOString()
+          : "";
+      }
+
       const updatedStudent = await withBusy(`renewal-record-${renewalRecordStudent.student_id}`, () =>
-        updateStudent(renewalRecordStudent.student_id, {
-          requirements: renewalRecordDraft.initial_payout_requirements,
-          semester_records: nextSemesterRecords
-        })
+        updateStudent(renewalRecordStudent.student_id, updatePayload)
       );
 
       setStudents((current) =>
@@ -2349,6 +2531,16 @@ export function AppShell({
   }
 
   async function handleExportPayroll() {
+    if (payrollStatusFilter === "payrolled") {
+      showValidationDialog({
+        title: "Received Payroll View",
+        message: "Switch to Not Yet Received before creating payroll files.",
+        fields: ["Payroll Status"],
+        acknowledgeLabel: "Review Payroll View"
+      });
+      return;
+    }
+
     if (!selectedPayrollRows.length) {
       showValidationDialog({
         title: "Select Students For Payroll",
@@ -2381,7 +2573,7 @@ export function AppShell({
 
     const confirmed = await requestConfirmation({
       title: "Create Payroll Files",
-      message: `Create payroll files for ${selectedPayrollRows.length} ${payrollTab === "new" ? "new" : "renewal"} student${selectedPayrollRows.length === 1 ? "" : "s"} in ${semesterLabel(payrollCycle)}?`,
+      message: `Create payroll files for ${selectedPayrollRows.length} student${selectedPayrollRows.length === 1 ? "" : "s"} in ${semesterLabel(payrollCycle)}?`,
       confirmLabel: "Create Payroll"
     });
     if (!confirmed) return;
@@ -2421,29 +2613,29 @@ export function AppShell({
           ),
           Promise.all(
             selectedPayrollRows.map((student) => {
-                    const existingCycleRecord = getSemesterRecordForCycle(student, payrollCycle);
-                    const payoutType = getSemesterPayoutType(student, existingCycleRecord);
-                    const nextCycleRecord: StudentSemesterRecord = {
-                      school_year: payrollCycle.school_year,
-                      sem_number: payrollCycle.sem_number,
-                      cycle_key: payrollCycle.cycle_key,
-                      payout_type: payoutType,
-                      payroll_status: "payrolled",
-                      renewal_status: "payrolled",
-                      payroll_id: payrollId,
-                      payroll_record_type: payoutRecordTypeForCycle(student, payrollCycle),
-                      payrolled_at: createdAt,
-                      payrolled_by_uid: currentUser.uid,
-                      payrolled_by_email: currentUser.email,
-                      initial_payout_requirements: getInitialPayoutRequirements(student),
-                      renewal_requirements: getSemesterRenewalRequirements(existingCycleRecord),
-                      requirements: getSemesterRenewalRequirements(existingCycleRecord),
-                      created_at: existingCycleRecord?.created_at || createdAt,
-                      updated_at: createdAt,
-                      updated_by_uid: currentUser.uid,
-                      updated_by_email: currentUser.email,
-                      notes: existingCycleRecord?.notes || ""
-                    };
+              const existingCycleRecord = getSemesterRecordForCycle(student, payrollCycle);
+              const payoutType = getSemesterPayoutType(student, existingCycleRecord);
+              const nextCycleRecord: StudentSemesterRecord = {
+                school_year: payrollCycle.school_year,
+                sem_number: payrollCycle.sem_number,
+                cycle_key: payrollCycle.cycle_key,
+                payout_type: payoutType,
+                payroll_status: "payrolled",
+                renewal_status: "payrolled",
+                payroll_id: payrollId,
+                payroll_record_type: payoutRecordTypeForCycle(student, payrollCycle),
+                payrolled_at: createdAt,
+                payrolled_by_uid: currentUser.uid,
+                payrolled_by_email: currentUser.email,
+                initial_payout_requirements: getInitialPayoutRequirements(student),
+                renewal_requirements: getSemesterRenewalRequirements(existingCycleRecord),
+                requirements: getSemesterRenewalRequirements(existingCycleRecord),
+                created_at: existingCycleRecord?.created_at || createdAt,
+                updated_at: createdAt,
+                updated_by_uid: currentUser.uid,
+                updated_by_email: currentUser.email,
+                notes: existingCycleRecord?.notes || ""
+              };
 
                     return updateStudent(student.student_id, {
                       payrolled: hasInitialPayroll(student) || payoutType === "initial",
@@ -2465,7 +2657,7 @@ export function AppShell({
         action: "export",
         entity: "payroll",
         entity_id: payrollId,
-        summary: `Created ${payrollTab === "new" ? "new" : "renewal"} payroll ${payrollId} for ${selectedPayrollRows.length} student${selectedPayrollRows.length === 1 ? "" : "s"}.`,
+        summary: `Created payroll ${payrollId} for ${selectedPayrollRows.length} student${selectedPayrollRows.length === 1 ? "" : "s"}.`,
         metadata: {
           payroll_id: payrollId,
           cycle_key: payrollCycle.cycle_key,
@@ -2615,6 +2807,23 @@ export function AppShell({
                 <Field label="Phone">
                   <input value={studentDraft.phone_number} onChange={(event) => patchStudentDraft({ phone_number: event.currentTarget.value })} />
                 </Field>
+                <div className="field full">
+                  <span>Renewal Status</span>
+                  <label className="document-check compact-check">
+                    <input
+                      type="checkbox"
+                      checked={studentDraft.for_renewal}
+                      disabled={studentRenewalLocked}
+                      onChange={(event) => patchStudentDraft({ for_renewal: event.currentTarget.checked })}
+                    />
+                    <span>For Renewal</span>
+                  </label>
+                  {studentRenewalLocked ? (
+                    <div className="inline-warning">
+                      Payroll history already places this student in the renewal group.
+                    </div>
+                  ) : null}
+                </div>
                 <RequirementsChecklist
                   draft={studentDraft}
                   onRequirementChange={patchStudentRequirement}
@@ -2649,7 +2858,7 @@ export function AppShell({
               subtitle={
                 studentInitialLoadPending
                   ? "Loading the first batch of active student records."
-                  : `${filteredStudents.length} loaded active student record${filteredStudents.length === 1 ? "" : "s"} match the current filters.`
+                  : `${loadedOfTotalText(filteredStudents.length, studentTotalCount, "active student record")} ${filteredStudents.length === 1 ? "matches" : "match"} the current filters.`
               }
             >
               {studentInitialLoadPending ? (
@@ -2691,15 +2900,17 @@ export function AppShell({
                     ]}
                     rows={filteredStudents}
                     getRowKey={(student) => student.student_id}
+                    endReachedEnabled={studentHasMore && !studentPageLoading}
+                    onEndReached={() => {
+                      void loadStudentsPage();
+                    }}
                   />
                   <StudentLoadControls
                     error={studentLoadError}
                     hasMore={studentHasMore}
                     isLoading={studentPageLoading}
                     loadedCount={students.length}
-                    onLoadMore={() => {
-                      void loadStudentsPage();
-                    }}
+                    totalCount={studentTotalCount}
                     onRetry={() => {
                       void loadStudentsPage({ reset: true });
                     }}
@@ -2732,7 +2943,7 @@ export function AppShell({
               subtitle={
                 studentInitialLoadPending
                   ? "Loading the first batch of student records."
-                  : `${filteredStudents.length} loaded record${filteredStudents.length === 1 ? "" : "s"} match the current filters.`
+                  : `${loadedOfTotalText(filteredStudents.length, studentTotalCount, "record")} ${filteredStudents.length === 1 ? "matches" : "match"} the current filters.`
               }
             >
               {studentInitialLoadPending ? (
@@ -2789,15 +3000,17 @@ export function AppShell({
                     ]}
                     rows={filteredStudents}
                     getRowKey={(student) => student.student_id}
+                    endReachedEnabled={studentHasMore && !studentPageLoading}
+                    onEndReached={() => {
+                      void loadStudentsPage();
+                    }}
                   />
                   <StudentLoadControls
                     error={studentLoadError}
                     hasMore={studentHasMore}
                     isLoading={studentPageLoading}
                     loadedCount={students.length}
-                    onLoadMore={() => {
-                      void loadStudentsPage();
-                    }}
+                    totalCount={studentTotalCount}
                     onRetry={() => {
                       void loadStudentsPage({ reset: true });
                     }}
@@ -2931,7 +3144,7 @@ export function AppShell({
               title="Requirements Timeline"
               description={
                 isAdmin
-                  ? "Manage student requirements by school year and semester, then move records from non-payrolled to payrolled when payroll is ready."
+                  ? "Manage initial and renewal requirements by school year and semester."
                   : "Manage student requirements by school year and semester from one focused workspace."
               }
             />
@@ -2973,29 +3186,29 @@ export function AppShell({
                 studentInitialLoadPending
                   ? `Loading students for ${semesterLabel(requirementsCycle)}.`
                   : isAdmin
-                    ? `${requirementRows.length} loaded ${requirementsTab === "payrolled" ? "payrolled" : "non-payrolled"} student${requirementRows.length === 1 ? "" : "s"} for ${semesterLabel(requirementsCycle)}.`
-                    : `${requirementRows.length} loaded student${requirementRows.length === 1 ? "" : "s"} for ${semesterLabel(requirementsCycle)}.`
+                    ? `${loadedOfTotalText(requirementRows.length, studentTotalCount, `${requirementsTab === "renewal" ? "renewal" : "not-renewal"} student`)} for ${semesterLabel(requirementsCycle)}.`
+                    : `${loadedOfTotalText(requirementRows.length, studentTotalCount, "student")} for ${semesterLabel(requirementsCycle)}.`
               }
               actions={
                 isAdmin ? (
-                  <div className="segmented-control" role="tablist" aria-label="Requirement payroll status">
+                  <div className="segmented-control" role="tablist" aria-label="Requirement student type">
                     <button
                       type="button"
-                      className={requirementsTab === "non-payrolled" ? "active" : ""}
-                      onClick={() => setRequirementsTab("non-payrolled")}
+                      className={requirementsTab === "not-renewal" ? "active" : ""}
+                      onClick={() => setRequirementsTab("not-renewal")}
                       role="tab"
-                      aria-selected={requirementsTab === "non-payrolled"}
+                      aria-selected={requirementsTab === "not-renewal"}
                     >
-                      Non-Payrolled
+                      Not-Renewal
                     </button>
                     <button
                       type="button"
-                      className={requirementsTab === "payrolled" ? "active" : ""}
-                      onClick={() => setRequirementsTab("payrolled")}
+                      className={requirementsTab === "renewal" ? "active" : ""}
+                      onClick={() => setRequirementsTab("renewal")}
                       role="tab"
-                      aria-selected={requirementsTab === "payrolled"}
+                      aria-selected={requirementsTab === "renewal"}
                     >
-                      Payrolled
+                      Renewal
                     </button>
                   </div>
                 ) : null
@@ -3060,6 +3273,16 @@ export function AppShell({
                       { key: "school", label: "School", render: (student) => student.school_address || "—" },
                       { key: "batch", label: "Batch", render: (student) => student.batch || "—" },
                       {
+                        key: "for_renewal",
+                        label: "For Renewal",
+                        render: (student) => (
+                          <FlagPill
+                            active={isForRenewalStudent(student)}
+                            label={isForRenewalStudent(student) ? "For renewal" : "Initial"}
+                          />
+                        )
+                      },
+                      {
                         key: "initial_payout_requirements",
                         label: "Initial Requirements",
                         render: (student) => {
@@ -3101,15 +3324,17 @@ export function AppShell({
                     ]}
                     rows={requirementRows}
                     getRowKey={(student) => student.student_id}
+                    endReachedEnabled={studentHasMore && !studentPageLoading}
+                    onEndReached={() => {
+                      void loadStudentsPage();
+                    }}
                   />
                   <StudentLoadControls
                     error={studentLoadError}
                     hasMore={studentHasMore}
                     isLoading={studentPageLoading}
                     loadedCount={students.length}
-                    onLoadMore={() => {
-                      void loadStudentsPage();
-                    }}
+                    totalCount={studentTotalCount}
                     onRetry={() => {
                       void loadStudentsPage({ reset: true });
                     }}
@@ -3418,41 +3643,90 @@ export function AppShell({
               title="Payroll Scope"
               subtitle={`${stats.payrollRecords} payroll records are currently loaded.`}
             >
-              <div className="segmented-control payroll-tabs" role="tablist" aria-label="Payroll student scope">
-                <button
-                  type="button"
-                  className={payrollTab === "new" ? "active" : ""}
-                  onClick={() => setPayrollTab("new")}
-                  role="tab"
-                  aria-selected={payrollTab === "new"}
-                >
-                  New
-                </button>
-                <button
-                  type="button"
-                  className={payrollTab === "renewal" ? "active" : ""}
-                  onClick={() => setPayrollTab("renewal")}
-                  role="tab"
-                  aria-selected={payrollTab === "renewal"}
-                >
-                  Renewal
-                </button>
+              <div className="payroll-scope-grid">
+                <div className="payroll-scope-group">
+                  <span className="payroll-scope-label">Payout Classification</span>
+                  <div className="segmented-control payroll-tabs" role="tablist" aria-label="Payroll student scope">
+                    <button
+                      type="button"
+                      className={payrollTab === "all" ? "active" : ""}
+                      onClick={() => setPayrollTab("all")}
+                      role="tab"
+                      aria-selected={payrollTab === "all"}
+                    >
+                      All
+                    </button>
+                    <button
+                      type="button"
+                      className={payrollTab === "new" ? "active" : ""}
+                      onClick={() => setPayrollTab("new")}
+                      role="tab"
+                      aria-selected={payrollTab === "new"}
+                    >
+                      Initial
+                    </button>
+                    <button
+                      type="button"
+                      className={payrollTab === "renewal" ? "active" : ""}
+                      onClick={() => setPayrollTab("renewal")}
+                      role="tab"
+                      aria-selected={payrollTab === "renewal"}
+                    >
+                      Renewal
+                    </button>
+                  </div>
+                </div>
+                <div className="payroll-scope-group">
+                  <span className="payroll-scope-label">Semester Payroll</span>
+                  <div className="segmented-control payroll-tabs" role="tablist" aria-label="Payroll receipt status">
+                    <button
+                      type="button"
+                      className={payrollStatusFilter === "payroll_candidates" ? "active" : ""}
+                      onClick={() => setPayrollStatusFilter("payroll_candidates")}
+                      role="tab"
+                      aria-selected={payrollStatusFilter === "payroll_candidates"}
+                    >
+                      Not Yet Received
+                    </button>
+                    <button
+                      type="button"
+                      className={payrollStatusFilter === "payrolled" ? "active" : ""}
+                      onClick={() => setPayrollStatusFilter("payrolled")}
+                      role="tab"
+                      aria-selected={payrollStatusFilter === "payrolled"}
+                    >
+                      Received
+                    </button>
+                  </div>
+                </div>
               </div>
             </Surface>
             <Surface
-              title={payrollTab === "new" ? "New Payroll" : "Renewal Payroll"}
+              title="Payroll Preparation"
               subtitle={
-                `${selectedPayrollRows.length} students selected from ${payrollRows.length} ${payrollTab === "new" ? "new" : "renewal"} records for ${semesterLabel(payrollCycle)}.`
+                payrollStatusFilter === "payrolled"
+                  ? `${loadedOfTotalText(payrollRows.length, studentTotalCount, "student")} ${payrollRows.length === 1 ? "has" : "have"} received payroll for ${semesterLabel(payrollCycle)}.`
+                  : `${selectedPayrollRows.length} students selected from ${loadedOfTotalText(payrollRows.length, studentTotalCount, "qualified unpaid student record")} for ${semesterLabel(payrollCycle)}.`
               }
               actions={
                 <div className="button-row">
-                  <button type="button" className="primary-button" onClick={handleExportPayroll} disabled={busyKey === "export-payroll" || hasInvalidPayrollSelection}>
+                  <button
+                    type="button"
+                    className="primary-button"
+                    onClick={handleExportPayroll}
+                    disabled={payrollStatusFilter === "payrolled" || busyKey === "export-payroll" || hasInvalidPayrollSelection}
+                  >
                     {busyKey === "export-payroll" ? "Creating..." : "Create Payroll Files"}
                   </button>
                   <button type="button" className="secondary-button" onClick={() => exportStudentsCsv(payrollRows)}>
                     Export Student CSV
                   </button>
-                  <button type="button" className="secondary-button" onClick={() => setSelectedPayrollIds(new Set(payrollRows.map((student) => student.student_id)))}>
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    onClick={() => setSelectedPayrollIds(new Set(payrollRows.map((student) => student.student_id)))}
+                    disabled={payrollStatusFilter === "payrolled"}
+                  >
                     Select All
                   </button>
                   <button type="button" className="secondary-button" onClick={() => setSelectedPayrollIds(new Set())}>
@@ -3486,15 +3760,6 @@ export function AppShell({
                     onChange={(event) => setPayrollBarangayFilter(event.currentTarget.value)}
                   />
                 </Field>
-                <Field label="Status">
-                  <select value={payrollStatusFilter} onChange={(event) => setPayrollStatusFilter(event.currentTarget.value)}>
-                    <option value="all">All statuses</option>
-                    <option value="qualified">Payroll qualified</option>
-                    <option value="not_qualified">Not qualified</option>
-                    <option value="payrolled">Payrolled this semester</option>
-                    <option value="unpayrolled">Not payrolled this semester</option>
-                  </select>
-                </Field>
                 <Field label="Batch">
                   <select value={payrollBatchFilter} onChange={(event) => setPayrollBatchFilter(event.currentTarget.value)}>
                     <option value="all">All batches</option>
@@ -3511,7 +3776,7 @@ export function AppShell({
                       setPayrollNameFilter("");
                       setPayrollSchoolFilter("");
                       setPayrollBarangayFilter("");
-                      setPayrollStatusFilter("all");
+                      setPayrollStatusFilter("payroll_candidates");
                       setPayrollBatchFilter("all");
                     }}
                   >
@@ -3537,6 +3802,7 @@ export function AppShell({
                       <input
                         type="checkbox"
                         checked={selectedPayrollIds.has(student.student_id)}
+                        disabled={payrollStatusFilter === "payrolled"}
                         onChange={(event) => {
                           const checked = event.currentTarget.checked;
                           setSelectedPayrollIds((current) => {
@@ -3561,6 +3827,20 @@ export function AppShell({
                 ]}
                 rows={payrollRows}
                 getRowKey={(student) => student.student_id}
+                endReachedEnabled={studentHasMore && !studentPageLoading}
+                onEndReached={() => {
+                  void loadStudentsPage();
+                }}
+              />
+              <StudentLoadControls
+                error={studentLoadError}
+                hasMore={studentHasMore}
+                isLoading={studentPageLoading}
+                loadedCount={students.length}
+                totalCount={studentTotalCount}
+                onRetry={() => {
+                  void loadStudentsPage({ reset: true });
+                }}
               />
             </Surface>
           </div>
@@ -3942,6 +4222,7 @@ export function AppShell({
                 <SummaryItem label="Year Level" value={studentDraft.year_level} />
                 <SummaryItem label="Batch" value={studentDraft.batch} />
                 <SummaryItem label="Phone" value={studentDraft.phone_number} />
+                <SummaryItem label="For Renewal" value={studentDraft.for_renewal ? "Yes" : "No"} />
                 <SummaryItem label="Requirements Ready" value={`${truthyDocumentLabels(studentDraft).length}/${requirementFields.length}`} />
               </div>
             </div>
@@ -4005,6 +4286,10 @@ export function AppShell({
                 <strong>{renewalRecordStudent.student_id}</strong>
               </div>
               <div>
+                <span>For Renewal</span>
+                <strong>{isForRenewalDraft(renewalRecordStudent, renewalRecordDraft) ? "Yes" : "No"}</strong>
+              </div>
+              <div>
                 <span>Profile Requirements</span>
                 <strong>{requirementCompletionCount(getStudentRequirements(renewalRecordStudent))}/{requirementFields.length}</strong>
               </div>
@@ -4032,6 +4317,26 @@ export function AppShell({
                 <span>School</span>
                 <strong>{renewalRecordStudent.school_address || "Not set"}</strong>
               </div>
+            </div>
+            <div className="dialog-history-panel">
+              <div className="dialog-history-header">
+                <span>Renewal Status</span>
+                <strong>{isForRenewalDraft(renewalRecordStudent, renewalRecordDraft) ? "Yes" : "No"}</strong>
+              </div>
+              {hasLockedPayrollHistory(renewalRecordStudent) ? (
+                <div className="inline-warning">
+                  Payroll history already places this student in the renewal group.
+                </div>
+              ) : null}
+              <label className="document-check compact-check">
+                <input
+                  type="checkbox"
+                  checked={isForRenewalDraft(renewalRecordStudent, renewalRecordDraft)}
+                  disabled={hasLockedPayrollHistory(renewalRecordStudent)}
+                  onChange={(event) => patchRenewalIndicator(event.currentTarget.checked)}
+                />
+                <span>For Renewal</span>
+              </label>
             </div>
             <div className="dialog-history-panel">
               <div className="dialog-history-header">
@@ -4077,7 +4382,7 @@ export function AppShell({
                   <button
                     type="button"
                     className="secondary-button compact"
-                    disabled={renewalRecordDraft.payout_type === "initial" || !hasInitialPayroll(renewalRecordStudent)}
+                    disabled={renewalRecordDraft.payout_type === "initial" || !isForRenewalDraft(renewalRecordStudent, renewalRecordDraft)}
                     onClick={() =>
                       setAllRenewalRequirements(
                         renewalRequirementCompletionCount(renewalRecordDraft.renewal_requirements) !== renewalRequirementFields.length
@@ -4090,17 +4395,11 @@ export function AppShell({
                   </button>
                 </div>
               </div>
-              {renewalRecordDraft.payout_type === "initial" ? (
+              {renewalRecordDraft.payout_type === "initial" || !isForRenewalDraft(renewalRecordStudent, renewalRecordDraft) ? (
                 <div className="inline-warning">
                   {isAdmin
-                    ? "Initial payout is selected, so renewal requirements are skipped for this first payroll."
+                    ? "Mark this student as for renewal before fulfilling renewal requirements."
                     : "Renewal requirements are skipped while this student is in the initial requirements cycle."}
-                </div>
-              ) : !hasInitialPayroll(renewalRecordStudent) ? (
-                <div className="inline-warning">
-                  {isAdmin
-                    ? "Initial payroll must be recorded before these renewal requirements can be fulfilled."
-                    : "Renewal requirements stay locked until the student's initial cycle is completed by an admin."}
                 </div>
               ) : null}
               <div className="document-grid">
@@ -4109,7 +4408,7 @@ export function AppShell({
                     <input
                       type="checkbox"
                       checked={renewalRecordDraft.renewal_requirements[field]}
-                      disabled={renewalRecordDraft.payout_type === "initial" || !hasInitialPayroll(renewalRecordStudent)}
+                      disabled={renewalRecordDraft.payout_type === "initial" || !isForRenewalDraft(renewalRecordStudent, renewalRecordDraft)}
                       onChange={(event) => patchRenewalRequirement(field, event.currentTarget.checked)}
                     />
                     <span>{RENEWAL_REQUIREMENT_LABELS[field]}</span>
@@ -4433,7 +4732,9 @@ function OptionSurface({
 function DataTable<T>({
   columns,
   rows,
-  getRowKey
+  getRowKey,
+  endReachedEnabled = false,
+  onEndReached
 }: {
   columns: Array<{
     key: string;
@@ -4442,9 +4743,57 @@ function DataTable<T>({
   }>;
   rows: T[];
   getRowKey: (row: T) => string;
+  endReachedEnabled?: boolean;
+  onEndReached?: () => void;
 }) {
+  const tableShellRef = useRef<HTMLDivElement | null>(null);
+  const endReachedRef = useRef(onEndReached);
+  const endReachedPendingRef = useRef(false);
+  const rowVirtualizer = useVirtualizer<HTMLDivElement, HTMLTableRowElement>({
+    count: rows.length,
+    estimateSize: () => dataTableEstimatedRowSize,
+    getScrollElement: () => tableShellRef.current,
+    getItemKey: (index) => {
+      const row = rows[index];
+      return row ? getRowKey(row) : index;
+    },
+    overscan: 8
+  });
+  const virtualRows = rowVirtualizer.getVirtualItems();
+  const firstVirtualRow = virtualRows[0];
+  const lastVirtualRow = virtualRows[virtualRows.length - 1];
+  const paddingTop = firstVirtualRow?.start ?? 0;
+  const paddingBottom = lastVirtualRow
+    ? Math.max(rowVirtualizer.getTotalSize() - lastVirtualRow.end, 0)
+    : rowVirtualizer.getTotalSize();
+
+  useEffect(() => {
+    endReachedRef.current = onEndReached;
+  }, [onEndReached]);
+
+  useEffect(() => {
+    endReachedPendingRef.current = false;
+  }, [endReachedEnabled, rows.length]);
+
+  function handleTableScroll(event: React.UIEvent<HTMLDivElement>) {
+    if (!endReachedEnabled) return;
+
+    const target = event.currentTarget;
+    const remainingScroll = target.scrollHeight - target.scrollTop - target.clientHeight;
+
+    if (remainingScroll > dataTableEstimatedRowSize * 2) {
+      endReachedPendingRef.current = false;
+      return;
+    }
+
+    if (endReachedPendingRef.current) return;
+
+    endReachedPendingRef.current = true;
+    endReachedRef.current?.();
+  }
+
   return (
-    <div className="table-shell">
+    <div ref={tableShellRef} className="table-shell" onScroll={handleTableScroll}>
       <table className="data-table">
         <thead>
           <tr>
@@ -4455,13 +4804,34 @@ function DataTable<T>({
         </thead>
         <tbody>
           {rows.length ? (
-            rows.map((row) => (
-              <tr key={getRowKey(row)}>
-                {columns.map((column) => (
-                  <td key={column.key}>{column.render(row)}</td>
-                ))}
-              </tr>
-            ))
+            <>
+              {paddingTop > 0 ? (
+                <tr className="virtual-spacer-row" aria-hidden="true">
+                  <td colSpan={columns.length} style={{ height: paddingTop }} />
+                </tr>
+              ) : null}
+              {virtualRows.map((virtualRow) => {
+                const row = rows[virtualRow.index];
+                if (!row) return null;
+
+                return (
+                  <tr
+                    key={virtualRow.key}
+                    ref={rowVirtualizer.measureElement}
+                    data-index={virtualRow.index}
+                  >
+                    {columns.map((column) => (
+                      <td key={column.key}>{column.render(row)}</td>
+                    ))}
+                  </tr>
+                );
+              })}
+              {paddingBottom > 0 ? (
+                <tr className="virtual-spacer-row" aria-hidden="true">
+                  <td colSpan={columns.length} style={{ height: paddingBottom }} />
+                </tr>
+              ) : null}
+            </>
           ) : (
             <tr>
               <td colSpan={columns.length}>
@@ -4492,16 +4862,18 @@ function StudentLoadControls({
   hasMore,
   isLoading,
   loadedCount,
-  onLoadMore,
+  totalCount,
   onRetry
 }: {
   error: string;
   hasMore: boolean;
   isLoading: boolean;
   loadedCount: number;
-  onLoadMore: () => void;
+  totalCount: number;
   onRetry: () => void;
 }) {
+  const loadedSummary = loadedOfTotalText(loadedCount, totalCount, "student");
+
   if (error && loadedCount === 0) {
     return (
       <div className="student-load-footer error">
@@ -4513,22 +4885,19 @@ function StudentLoadControls({
     );
   }
 
-  if (!hasMore && !error) return null;
-
   return (
     <div className={`student-load-footer ${error ? "error" : ""}`}>
       <span>
         {error
           ? error
+          : isLoading
+            ? loadedCount || totalCount
+              ? `Loading more students... ${loadedSummary}.`
+              : "Loading students..."
           : hasMore
-            ? `${loadedCount} student${loadedCount === 1 ? "" : "s"} loaded.`
-            : "All loaded students are visible."}
+            ? `${loadedSummary}.`
+            : `${loadedSummary}.`}
       </span>
-      {hasMore ? (
-        <button type="button" className="secondary-button" onClick={onLoadMore} disabled={isLoading}>
-          {isLoading ? "Loading..." : "Load More Students"}
-        </button>
-      ) : null}
     </div>
   );
 }

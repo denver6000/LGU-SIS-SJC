@@ -28,37 +28,37 @@ env:
       - BUILD
       - RUNTIME
   - variable: NEXT_PUBLIC_FIREBASE_API_KEY
-    value: "AIzaSyBVKHZM21GXb-3ycPCcD9xGh6CclFVmGUQ"
+    value: "AIzaSyDTXhJzgU97J_YKTph5OxgyrYdxbjj7ET4"
     availability:
       - BUILD
       - RUNTIME
   - variable: NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN
-    value: "lgus-sjc-scholarship.firebaseapp.com"
+    value: "lgu-sis.firebaseapp.com"
     availability:
       - BUILD
       - RUNTIME
   - variable: NEXT_PUBLIC_FIREBASE_PROJECT_ID
-    value: "lgus-sjc-scholarship"
+    value: "lgu-sis"
     availability:
       - BUILD
       - RUNTIME
   - variable: NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET
-    value: "lgus-sjc-scholarship.firebasestorage.app"
+    value: "lgu-sis.firebasestorage.app"
     availability:
       - BUILD
       - RUNTIME
   - variable: NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID
-    value: "69562690564"
+    value: "231819567910"
     availability:
       - BUILD
       - RUNTIME
   - variable: NEXT_PUBLIC_FIREBASE_APP_ID
-    value: "1:69562690564:web:05b7a3f7f93883838b5951"
+    value: "1:231819567910:web:457297f4b187feb51817e7"
     availability:
       - BUILD
       - RUNTIME
   - variable: NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID
-    value: "G-JQ9GNYEDL6"
+    value: "G-XSRJK1D5RV"
     availability:
       - BUILD
       - RUNTIME

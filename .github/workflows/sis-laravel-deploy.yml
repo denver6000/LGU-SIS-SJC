@@ -1,0 +1,115 @@
+name: Deploy SIS Laravel to Hostinger
+
+on:
+  workflow_dispatch:
+  workflow_run:
+    workflows:
+      - SIS Laravel CI
+    types:
+      - completed
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: apps/sis-laravel
+
+jobs:
+  build:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: mbstring, dom, fileinfo, mysql
+          coverage: none
+          tools: composer:v2
+
+      - name: Install production Composer dependencies
+        run: composer install --no-dev --no-interaction --prefer-dist --no-progress --optimize-autoloader
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: apps/sis-laravel/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Build frontend assets
+        run: npm run build
+
+      - name: Prepare release archive
+        run: |
+          tar --exclude='.env' \
+              --exclude='.env.*' \
+              --exclude='node_modules' \
+              --exclude='storage/logs/*' \
+              -czf "$RUNNER_TEMP/release.tar.gz" .
+
+      - name: Upload release archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: sis-laravel-release
+          path: ${{ runner.temp }}/release.tar.gz
+          if-no-files-found: error
+
+  deploy:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download release archive
+        uses: actions/download-artifact@v4
+        with:
+          name: sis-laravel-release
+
+      - name: Upload release to Hostinger
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.HOSTINGER_SSH_HOST }}
+          username: ${{ secrets.HOSTINGER_SSH_USER }}
+          port: ${{ secrets.HOSTINGER_SSH_PORT }}
+          key: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
+          source: release.tar.gz
+          target: ~/domains/sjc-sis.dmballesteros.com/sis-laravel/
+
+      - name: Activate release on Hostinger
+        uses: appleboy/ssh-action@v1.2.2
+        with:
+          host: ${{ secrets.HOSTINGER_SSH_HOST }}
+          username: ${{ secrets.HOSTINGER_SSH_USER }}
+          port: ${{ secrets.HOSTINGER_SSH_PORT }}
+          key: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
+          script: |
+            set -e
+            cd ~/domains/sjc-sis.dmballesteros.com/sis-laravel
+            test -f .env
+            PHP_BIN=/opt/alt/php84/usr/bin/php
+            test -x "$PHP_BIN"
+            "$PHP_BIN" -v
+            tar -xzf release.tar.gz
+            rm -f release.tar.gz
+            cp -a public/. ../public_html/
+            sed -i "s#__DIR__.'/../vendor/autoload.php#__DIR__.'/../sis-laravel/vendor/autoload.php#" ../public_html/index.php
+            sed -i "s#__DIR__.'/../bootstrap/app.php#__DIR__.'/../sis-laravel/bootstrap/app.php#" ../public_html/index.php
+            "$PHP_BIN" artisan config:clear
+            "$PHP_BIN" artisan migrate --force
+            "$PHP_BIN" artisan optimize:clear
+            "$PHP_BIN" artisan config:cache
+            "$PHP_BIN" artisan route:cache
+            "$PHP_BIN" artisan view:cache
