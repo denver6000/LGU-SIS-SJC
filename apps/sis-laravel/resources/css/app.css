@@ -64,6 +64,13 @@ td { font-size:.88rem; } tr:hover td { background:#fbfcf8; } td a { font-weight:
 .form-section h2 { margin:0 0 14px; font-size:1rem; }
 .form-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; }
 label { display:grid; gap:6px; color:var(--text-soft); font-size:.78rem; font-weight:700; }
+.toggle-field { display:grid; gap:6px; }
+.field-label { color:var(--text-soft); font-size:.78rem; font-weight:700; }
+.toggle-field .segmented-control { display:flex; gap:0; }
+.toggle-field .segmented-control label { display:flex; align-items:center; gap:7px; padding:10px 12px; color:var(--text-soft); background:var(--surface); border:1px solid var(--line); cursor:pointer; font-weight:600; }
+.toggle-field .segmented-control label + label { border-left:0; }
+.toggle-field .segmented-control label:has(input:checked) { color:var(--green-deep); background:var(--green-soft); border-color:#b9d6ae; }
+.toggle-field .segmented-control input { accent-color:var(--green); }
 input,select,textarea { width:100%; padding:10px 11px; color:var(--text); background:#fff; border:1px solid #c8cbbb; border-radius:3px; font:inherit; font-weight:400; }
 textarea { min-height:84px; resize:vertical; }
 .check { display:flex; grid-template-columns:none; align-items:center; gap:8px; font-weight:500; }

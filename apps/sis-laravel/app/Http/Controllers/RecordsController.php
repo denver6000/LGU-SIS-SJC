@@ -8,7 +8,7 @@ use Illuminate\Support\Str;
 
 class RecordsController extends Controller
 {
-    private const COLLECTIONS = ['barangays', 'schools', 'batches'];
+    private const COLLECTIONS = ['barangays', 'schools', 'batches', 'courses'];
 
     public function index()
     {
@@ -19,13 +19,14 @@ class RecordsController extends Controller
             'barangays' => $options->get('barangays', collect()),
             'schools' => $options->get('schools', collect()),
             'batches' => $options->get('batches', collect()),
+            'courses' => $options->get('courses', collect()),
         ]);
     }
 
     public function store(Request $request)
     {
         $data = $request->validate([
-            'collection_name' => ['required', 'in:barangays,schools,batches'],
+            'collection_name' => ['required', 'in:barangays,schools,batches,courses'],
             'name' => ['required', 'string', 'max:255'],
         ]);
 

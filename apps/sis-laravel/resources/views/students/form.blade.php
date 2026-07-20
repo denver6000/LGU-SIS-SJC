@@ -7,7 +7,7 @@
 <div class="form-section"><h2>Student information</h2><div class="form-grid">
 <label>Student ID<input name="student_id" value="{{ old('student_id', $student->student_id) }}" required></label>
 <label>Full name<input name="full_name" value="{{ old('full_name', $student->full_name) }}" required></label>
-<label>Payout track<select name="payout_track" required><option value="initial" @selected(old('payout_track', $student->payout_track ?: 'initial') === 'initial')>Initial payout</option><option value="renewal" @selected(old('payout_track', $student->payout_track) === 'renewal')>Renewal payout</option></select></label>
+<div class="toggle-field"><span class="field-label">Student type</span><div class="segmented-control" role="radiogroup" aria-label="Student type"><label><input type="radio" name="payout_track" value="initial" @checked(old('payout_track', $student->payout_track ?: 'initial') === 'initial')> New student</label><label><input type="radio" name="payout_track" value="renewal" @checked(old('payout_track', $student->payout_track) === 'renewal')> For renewal</label></div></div>
 <label>Student number<input name="student_number" value="{{ old('student_number', $student->student_number) }}"></label>
 <label>Phone number<input name="phone_number" value="{{ old('phone_number', $student->phone_number) }}"></label>
 <label>Barangay<select name="barangay"><option value="">Select barangay</option>@foreach($barangays as $barangay)<option value="{{ $barangay }}" @selected(old('barangay', $student->barangay) === $barangay)>{{ $barangay }}</option>@endforeach</select></label>
@@ -17,7 +17,7 @@
 <label>School year / semester<select name="cycle_id" required @if($editing) onchange="window.location='{{ route('students.edit', $student) }}?cycle_id='+this.value" @endif>
 @foreach($cycles as $cycle)<option value="{{ $cycle->id }}" @selected(old('cycle_id', $selectedCycle?->academic_cycle_id) == $cycle->id)>{{ $cycle->label() }}</option>@endforeach</select></label>
 <label>School<select name="school"><option value="">Select school</option>@foreach($schools as $school)<option value="{{ $school }}" @selected(old('school', $selectedCycle?->school) === $school)>{{ $school }}</option>@endforeach</select></label>
-<label>Course<input name="course" value="{{ old('course', $selectedCycle?->course) }}"></label>
+<label>Course<select name="course"><option value="">Select course</option>@foreach($courses as $course)<option value="{{ $course }}" @selected(old('course', $selectedCycle?->course) === $course)>{{ $course }}</option>@endforeach</select></label>
 <label>Year level<input name="year_level" value="{{ old('year_level', $selectedCycle?->year_level) }}"></label>
 <label>Batch<select name="batch"><option value="">Select batch</option>@foreach($batches as $batch)<option value="{{ $batch }}" @selected(old('batch', $selectedCycle?->batch) === $batch)>{{ $batch }}</option>@endforeach</select></label>
 </div></div>

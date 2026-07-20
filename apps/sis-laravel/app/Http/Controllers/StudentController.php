@@ -54,6 +54,7 @@ class StudentController extends Controller
             'barangays' => SisOption::where('collection_name', 'barangays')->orderBy('name')->pluck('name'),
             'schools' => SisOption::where('collection_name', 'schools')->orderBy('name')->pluck('name'),
             'batches' => SisOption::where('collection_name', 'batches')->orderBy('name')->pluck('name'),
+            'courses' => SisOption::where('collection_name', 'courses')->orderBy('name')->pluck('name'),
         ];
     }
 
