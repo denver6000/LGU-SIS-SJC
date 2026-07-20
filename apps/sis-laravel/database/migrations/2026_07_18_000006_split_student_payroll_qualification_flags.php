@@ -18,6 +18,11 @@ return new class extends Migration
 
         DB::table('students')->whereIn('id', DB::table('student_cycles')->where('payout_classification', 'renewal')->pluck('student_id'))->update(['payout_track' => 'renewal']);
         DB::table('student_cycles')->where('qualification_status', 'qualified')->update(['payroll_qualified' => true]);
+        DB::table('student_cycle_requirements')->update([
+            'renewal_liquidation' => false,
+            'renewal_proof_of_enrollment' => false,
+            'renewal_latest_grades' => false,
+        ]);
 
         Schema::table('student_cycles', function (Blueprint $table) {
             $table->dropColumn(['payout_classification', 'qualification_status']);

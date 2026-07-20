@@ -9,3 +9,5 @@ document.addEventListener('DOMContentLoaded', () => {
     document.querySelector('[data-rail-close]')?.addEventListener('click', () => setOpen(false));
     backdrop?.addEventListener('click', () => setOpen(false));
 });
+
+import './payroll-export';

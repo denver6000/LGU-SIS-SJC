@@ -34,6 +34,9 @@ class RequirementsController extends Controller
             ->when($tab === 'initial', fn ($query) => $query->whereHas('student', fn ($students) => $students->where('payout_track', 'initial')))
             ->when($tab === 'renewal', fn ($query) => $query->whereHas('student', fn ($students) => $students->where('payout_track', 'renewal')))
             ->when($request->filled('name'), fn ($query) => $query->whereHas('student', fn ($students) => $students->where('full_name', 'like', '%'.$request->string('name')->value().'%')))
+            ->when($request->filled('address'), fn ($query) => $query->whereHas('student', fn ($students) => $students->where('address', 'like', '%'.$request->string('address')->value().'%')))
+            ->when($request->filled('school'), fn ($query) => $query->where('school', 'like', '%'.$request->string('school')->value().'%'))
+            ->when($request->filled('batch'), fn ($query) => $query->where('batch', 'like', '%'.$request->string('batch')->value().'%'))
             ->when($request->filled('barangay'), fn ($query) => $query->whereHas('student', fn ($students) => $students->where('barangay', 'like', '%'.$request->string('barangay')->value().'%')))
             ->get();
 
@@ -43,7 +46,8 @@ class RequirementsController extends Controller
     public function edit(StudentCycle $studentCycle, Request $request)
     {
         $studentCycle->load(['student', 'academicCycle', 'requirements']);
-        $tab = $request->string('tab')->value() === 'renewal' ? 'renewal' : 'initial';
+        $requestedTab = $request->string('tab')->value();
+        $tab = $requestedTab === 'renewal' ? 'renewal' : ($requestedTab === 'all' ? $studentCycle->student->payout_track : 'initial');
         $fields = $tab === 'renewal' ? self::RENEWAL_FIELDS : self::INITIAL_FIELDS;
 
         return view('requirements.form', compact('studentCycle', 'tab', 'fields'));
