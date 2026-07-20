@@ -14,8 +14,13 @@
 <label>Address<textarea name="address">{{ old('address', $student->address) }}</textarea></label>
 </div></div>
 <div class="form-section"><h2>Academic cycle</h2><div class="form-grid">
-<label>School year / semester<select name="cycle_id" required @if($editing) onchange="window.location='{{ route('students.edit', $student) }}?cycle_id='+this.value" @endif>
+@if($editing)
+<label>School year / semester<select name="cycle_id" required onchange="window.location='{{ route('students.edit', $student) }}?cycle_id='+this.value">
 @foreach($cycles as $cycle)<option value="{{ $cycle->id }}" @selected(old('cycle_id', $selectedCycle?->academic_cycle_id) == $cycle->id)>{{ $cycle->label() }}</option>@endforeach</select></label>
+@else
+<label>School year<input name="school_year" value="{{ old('school_year') }}" placeholder="2026-2027" pattern="\d{4}-\d{4}" title="Use the format YYYY-YYYY" required></label>
+<label>Semester<select name="semester_number" required><option value="1" @selected(old('semester_number') == '1')>1st Semester</option><option value="2" @selected(old('semester_number') == '2')>2nd Semester</option></select></label>
+@endif
 <label>School<select name="school"><option value="">Select school</option>@foreach($schools as $school)<option value="{{ $school }}" @selected(old('school', $selectedCycle?->school) === $school)>{{ $school }}</option>@endforeach</select></label>
 <label>Course<select name="course"><option value="">Select course</option>@foreach($courses as $course)<option value="{{ $course }}" @selected(old('course', $selectedCycle?->course) === $course)>{{ $course }}</option>@endforeach</select></label>
 <label>Year level<input name="year_level" value="{{ old('year_level', $selectedCycle?->year_level) }}"></label>
