@@ -17,15 +17,22 @@ Route::post('/logout', [AuthController::class, 'destroy'])->middleware('auth')->
 
 Route::middleware(['auth', 'role:admin,encoder'])->group(function () {
     Route::get('/', fn () => redirect()->route('students.index'))->name('dashboard');
-    Route::resource('students', StudentController::class)->only(['index', 'create', 'store', 'edit', 'update']);
+    Route::get('/students', [StudentController::class, 'index'])->name('students.index');
+    Route::get('/students/create', [StudentController::class, 'create'])->name('students.create');
+    Route::post('/students', [StudentController::class, 'store'])->name('students.store');
     Route::get('/requirements', [RequirementsController::class, 'index'])->name('requirements.index');
     Route::get('/requirements/students/{student}/edit', [RequirementsController::class, 'edit'])->name('requirements.edit');
     Route::put('/requirements/students/{student}', [RequirementsController::class, 'update'])->name('requirements.update');
     Route::put('/requirements/{studentCycle}', [RequirementsController::class, 'updateCycle']);
-    Route::get('/payrolls', [PayrollController::class, 'index'])->name('payrolls.index');
     Route::get('/records', [RecordsController::class, 'index'])->name('records.index');
     Route::post('/records', [RecordsController::class, 'store'])->name('records.store');
     Route::delete('/records/{sisOption}', [RecordsController::class, 'destroy'])->name('records.destroy');
+});
+
+Route::middleware(['auth', 'role:admin'])->group(function () {
+    Route::get('/students/{student}/edit', [StudentController::class, 'edit'])->name('students.edit');
+    Route::put('/students/{student}', [StudentController::class, 'update'])->name('students.update');
+    Route::get('/payrolls', [PayrollController::class, 'index'])->name('payrolls.index');
 });
 
 Route::middleware(['auth', 'role:admin'])->prefix('users')->name('users.')->group(function () {

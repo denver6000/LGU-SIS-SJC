@@ -37,6 +37,16 @@ class ExampleTest extends TestCase
         $this->actingAs($user)->get('/users')->assertForbidden();
     }
 
+    public function test_encoder_cannot_access_payroll_or_edit_student_profile(): void
+    {
+        $user = User::factory()->create(['role' => 'encoder', 'is_active' => true]);
+        $student = Student::create(['student_id' => 'STU002', 'full_name' => 'Restricted Student', 'payout_track' => 'initial']);
+
+        $this->actingAs($user)->get('/payrolls')->assertForbidden();
+        $this->actingAs($user)->get("/students/{$student->id}/edit")->assertForbidden();
+        $this->actingAs($user)->put("/students/{$student->id}", [])->assertForbidden();
+    }
+
     public function test_authenticated_staff_can_add_a_student_and_manage_requirements_separately(): void
     {
         $user = User::factory()->create(['role' => 'admin', 'is_active' => true]);
