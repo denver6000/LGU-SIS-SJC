@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\AcademicCycle;
+use App\Models\Student;
 use App\Models\StudentCycle;
 use Illuminate\Http\Request;
 
@@ -29,39 +30,69 @@ class RequirementsController extends Controller
         $cycle = $cycles->firstWhere('id', $request->integer('cycle_id')) ?? $cycles->first();
         $tab = in_array($request->string('tab')->value(), ['all', 'initial', 'renewal'], true) ? $request->string('tab')->value() : 'all';
 
-        $studentCycles = StudentCycle::with(['student', 'requirements', 'academicCycle'])
-            ->when($cycle, fn ($query) => $query->where('academic_cycle_id', $cycle->id))
-            ->when($tab === 'initial', fn ($query) => $query->whereHas('student', fn ($students) => $students->where('payout_track', 'initial')))
-            ->when($tab === 'renewal', fn ($query) => $query->whereHas('student', fn ($students) => $students->where('payout_track', 'renewal')))
-            ->when($request->filled('name'), fn ($query) => $query->whereHas('student', fn ($students) => $students->where('full_name', 'like', '%'.$request->string('name')->value().'%')))
-            ->when($request->filled('address'), fn ($query) => $query->whereHas('student', fn ($students) => $students->where('address', 'like', '%'.$request->string('address')->value().'%')))
-            ->when($request->filled('school'), fn ($query) => $query->where('school', 'like', '%'.$request->string('school')->value().'%'))
-            ->when($request->filled('batch'), fn ($query) => $query->where('batch', 'like', '%'.$request->string('batch')->value().'%'))
-            ->when($request->filled('barangay'), fn ($query) => $query->whereHas('student', fn ($students) => $students->where('barangay', 'like', '%'.$request->string('barangay')->value().'%')))
+        $studentCycles = Student::with(['cycles' => fn ($query) => $query
+                ->when($cycle, fn ($query) => $query->where('academic_cycle_id', $cycle->id))
+                ->with('requirements')])
+            ->when($tab === 'initial', fn ($query) => $query->where('payout_track', 'initial'))
+            ->when($tab === 'renewal', fn ($query) => $query->where('payout_track', 'renewal'))
+            ->when($request->filled('name'), fn ($query) => $query->where('full_name', 'like', '%'.$request->string('name')->value().'%'))
+            ->when($request->filled('address'), fn ($query) => $query->where('address', 'like', '%'.$request->string('address')->value().'%'))
+            ->when($request->filled('school'), fn ($query) => $query->whereHas('cycles', fn ($cycles) => $cycles->where('academic_cycle_id', $cycle?->id)->where('school', 'like', '%'.$request->string('school')->value().'%')))
+            ->when($request->filled('batch'), fn ($query) => $query->whereHas('cycles', fn ($cycles) => $cycles->where('academic_cycle_id', $cycle?->id)->where('batch', 'like', '%'.$request->string('batch')->value().'%')))
+            ->when($request->filled('barangay'), fn ($query) => $query->where('barangay', 'like', '%'.$request->string('barangay')->value().'%'))
+            ->orderBy('full_name')
             ->get();
 
         return view('requirements.index', compact('cycles', 'cycle', 'tab', 'studentCycles'));
     }
 
-    public function edit(StudentCycle $studentCycle, Request $request)
+    public function edit(Student $student, Request $request)
     {
-        $studentCycle->load(['student', 'academicCycle', 'requirements']);
+        $cycle = AcademicCycle::findOrFail($request->integer('cycle_id'));
+        $studentCycle = $student->cycles()->with(['student', 'academicCycle', 'requirements'])
+            ->where('academic_cycle_id', $cycle->id)->first();
+
+        if (! $studentCycle) {
+            $studentCycle = new StudentCycle(['student_id' => $student->id, 'academic_cycle_id' => $cycle->id]);
+            $studentCycle->setRelation('student', $student);
+            $studentCycle->setRelation('academicCycle', $cycle);
+        }
+
         $requestedTab = $request->string('tab')->value();
         $tab = $requestedTab === 'renewal' ? 'renewal' : ($requestedTab === 'all' ? $studentCycle->student->payout_track : 'initial');
         $fields = $tab === 'renewal' ? self::RENEWAL_FIELDS : self::INITIAL_FIELDS;
+        $initialFields = self::INITIAL_FIELDS;
+        $renewalFields = self::RENEWAL_FIELDS;
 
-        return view('requirements.form', compact('studentCycle', 'tab', 'fields'));
+        return view('requirements.form', compact('studentCycle', 'tab', 'fields', 'initialFields', 'renewalFields'));
     }
 
-    public function update(Request $request, StudentCycle $studentCycle)
+    public function update(Request $request, Student $student)
     {
-        $tab = $request->string('tab')->value() === 'renewal' ? 'renewal' : 'initial';
-        $fields = $tab === 'renewal' ? self::RENEWAL_FIELDS : self::INITIAL_FIELDS;
+        $cycleData = $request->validate(['cycle_id' => ['required', 'exists:academic_cycles,id']]);
+        $studentCycle = $student->cycles()->firstOrCreate(['academic_cycle_id' => $cycleData['cycle_id']]);
+        return $this->saveUpdate($request, $studentCycle);
+    }
+
+    public function updateCycle(Request $request, StudentCycle $studentCycle)
+    {
+        return $this->saveUpdate($request, $studentCycle);
+    }
+
+    private function saveUpdate(Request $request, StudentCycle $studentCycle)
+    {
+        $studentCycle->loadMissing('student');
+        $payoutTrack = $request->input('payout_track', $studentCycle->student->payout_track);
+        $request->merge(['payout_track' => $payoutTrack]);
         $data = $request->validate(array_merge(
+            ['payout_track' => ['required', 'in:initial,renewal']],
             ['payroll_qualified' => ['nullable', 'boolean']],
             ['qualification_note' => ['nullable', 'string']],
-            collect($fields)->mapWithKeys(fn ($label, $field) => [$field => ['nullable', 'boolean']])->all(),
+            collect(self::INITIAL_FIELDS + self::RENEWAL_FIELDS)->mapWithKeys(fn ($label, $field) => [$field => ['nullable', 'boolean']])->all(),
         ));
+        $payoutTrack = $data['payout_track'];
+        $fields = $payoutTrack === 'renewal' ? self::RENEWAL_FIELDS : self::INITIAL_FIELDS;
+        $studentCycle->student->update(['payout_track' => $payoutTrack]);
         $studentCycle->update([
             'payroll_qualified' => $request->boolean('payroll_qualified'),
             'qualification_note' => $data['qualification_note'] ?? null,

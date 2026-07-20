@@ -19,8 +19,9 @@ Route::middleware(['auth', 'role:admin,encoder'])->group(function () {
     Route::get('/', fn () => redirect()->route('students.index'))->name('dashboard');
     Route::resource('students', StudentController::class)->only(['index', 'create', 'store', 'edit', 'update']);
     Route::get('/requirements', [RequirementsController::class, 'index'])->name('requirements.index');
-    Route::get('/requirements/{studentCycle}/edit', [RequirementsController::class, 'edit'])->name('requirements.edit');
-    Route::put('/requirements/{studentCycle}', [RequirementsController::class, 'update'])->name('requirements.update');
+    Route::get('/requirements/students/{student}/edit', [RequirementsController::class, 'edit'])->name('requirements.edit');
+    Route::put('/requirements/students/{student}', [RequirementsController::class, 'update'])->name('requirements.update');
+    Route::put('/requirements/{studentCycle}', [RequirementsController::class, 'updateCycle']);
     Route::get('/payrolls', [PayrollController::class, 'index'])->name('payrolls.index');
     Route::get('/records', [RecordsController::class, 'index'])->name('records.index');
     Route::post('/records', [RecordsController::class, 'store'])->name('records.store');
