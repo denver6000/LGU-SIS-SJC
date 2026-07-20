@@ -29,6 +29,7 @@ Route::middleware(['auth', 'role:admin,encoder'])->group(function () {
     Route::put('/requirements/{studentCycle}', [RequirementsController::class, 'updateCycle']);
     Route::get('/records', [RecordsController::class, 'index'])->name('records.index');
     Route::post('/records', [RecordsController::class, 'store'])->name('records.store');
+    Route::post('/records/cycles', [RecordsController::class, 'storeCycle'])->name('records.cycles.store');
     Route::delete('/records/{sisOption}', [RecordsController::class, 'destroy'])->name('records.destroy');
 });
 
