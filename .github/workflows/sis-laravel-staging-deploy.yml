@@ -85,7 +85,7 @@ jobs:
           port: ${{ secrets.HOSTINGER_SSH_PORT }}
           key: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
           source: release.tar.gz
-          target: ~/domains/ightpink-hawk-623505.hostingersite.com/sis-laravel/
+          target: ~/domains/lightpink-hawk-623505.hostingersite.com/sis-laravel/
 
       - name: Activate staging release on Hostinger
         uses: appleboy/ssh-action@v1.2.2
@@ -96,7 +96,7 @@ jobs:
           key: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
           script: |
             set -e
-            cd ~/domains/ightpink-hawk-623505.hostingersite.com/sis-laravel
+            cd ~/domains/lightpink-hawk-623505.hostingersite.com/sis-laravel
             test -f .env
             PHP_BIN=/opt/alt/php84/usr/bin/php
             test -x "$PHP_BIN"
