@@ -26,6 +26,7 @@
                     <a class="{{ request()->routeIs('payrolls.*') ? 'active' : '' }}" href="{{ route('payrolls.index') }}"><span>₱</span> Payrolls</a>
                 @endif
                 <a class="{{ request()->routeIs('records.*') ? 'active' : '' }}" href="{{ route('records.index') }}"><span>▤</span> Records</a>
+                <a class="{{ request()->routeIs('profile.*') ? 'active' : '' }}" href="{{ route('profile.edit') }}"><span>♙</span> Profile</a>
                 @if(auth()->user()->isAdmin())
                     <a class="{{ request()->routeIs('users.*') ? 'active' : '' }}" href="{{ route('users.index') }}"><span>♙</span> Users</a>
                     <a class="{{ request()->routeIs('activity.*') ? 'active' : '' }}" href="{{ route('activity.index') }}"><span>◷</span> Activity</a>

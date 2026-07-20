@@ -1,21 +1,51 @@
 name: Deploy SIS Laravel to Staging
 
 on:
-  workflow_dispatch:
-  workflow_run:
-    workflows:
-      - SIS Laravel CI
-    types:
-      - completed
+  push:
     branches:
       - staging
+    paths:
+      - 'apps/sis-laravel/**'
+      - '.github/workflows/sis-laravel-staging-deploy.yml'
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
+  test:
+    if: ${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/sis-laravel
+
+    steps:
+      - name: Check out staging commit
+        uses: actions/checkout@v4
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: mbstring, dom, fileinfo, sqlite3, pdo_sqlite
+          coverage: none
+          tools: composer:v2
+
+      - name: Install Composer dependencies
+        run: composer install --no-interaction --prefer-dist --no-progress
+
+      - name: Configure application for tests
+        run: |
+          cp .env.example .env
+          php artisan key:generate --force
+
+      - name: Run Laravel tests
+        run: php artisan test
+
   build:
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    if: ${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
+    needs: test
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -67,7 +97,7 @@ jobs:
           if-no-files-found: error
 
   deploy:
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    if: ${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
     needs: build
     runs-on: ubuntu-latest
 
