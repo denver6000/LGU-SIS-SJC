@@ -38,6 +38,38 @@ class ExampleTest extends TestCase
         $this->actingAs($user)->get('/users')->assertForbidden();
     }
 
+    public function test_encoder_can_update_own_profile(): void
+    {
+        $user = User::factory()->create(['role' => 'encoder', 'is_active' => true, 'password' => 'password']);
+
+        $this->actingAs($user)->get('/profile')->assertOk()->assertSee('My profile');
+        $this->actingAs($user)->put('/profile', [
+            'name' => 'Updated Encoder',
+            'email' => $user->email,
+            'current_password' => 'password',
+            'password' => 'new-password',
+            'password_confirmation' => 'new-password',
+        ])->assertRedirect('/profile');
+
+        $this->assertDatabaseHas('users', ['id' => $user->id, 'name' => 'Updated Encoder']);
+    }
+
+    public function test_admin_can_update_another_users_account(): void
+    {
+        $admin = User::factory()->create(['role' => 'admin', 'is_active' => true]);
+        $encoder = User::factory()->create(['role' => 'encoder', 'is_active' => true]);
+
+        $this->actingAs($admin)->get("/users/{$encoder->id}/edit")->assertOk()->assertSee('Manage user');
+        $this->actingAs($admin)->put("/users/{$encoder->id}", [
+            'name' => 'Renamed Encoder',
+            'email' => $encoder->email,
+            'role' => 'encoder',
+            'is_active' => '1',
+        ])->assertRedirectToRoute('users.index');
+
+        $this->assertDatabaseHas('users', ['id' => $encoder->id, 'name' => 'Renamed Encoder']);
+    }
+
     public function test_encoder_cannot_access_payroll_or_edit_student_profile(): void
     {
         $user = User::factory()->create(['role' => 'encoder', 'is_active' => true]);
