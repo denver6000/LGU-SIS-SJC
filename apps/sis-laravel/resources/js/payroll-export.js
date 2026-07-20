@@ -69,6 +69,7 @@ function buildWordData(students, metadata) {
         data[`student_${row}_name`] = '';
         data[`student_${row}_year_level`] = '';
         data[`student_${row}_school`] = '';
+        data[`passed_${row}`] = '';
     }
     students.forEach((student, index) => {
         const row = index + 1;
@@ -76,6 +77,7 @@ function buildWordData(students, metadata) {
         data[`student_${row}_name`] = student.full_name || '';
         data[`student_${row}_year_level`] = student.year_level || '';
         data[`student_${row}_school`] = student.school_address || '';
+        data[`passed_${row}`] = 'PASSED';
     });
     const markerRow = Math.min(students.length + 1, MARKER_ROW);
     data[`student_${markerRow}_fname`] = END_MARKER;
