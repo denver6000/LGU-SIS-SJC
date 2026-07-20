@@ -19,18 +19,19 @@ class StudentCycle extends Model
 
     protected $fillable = [
         'student_id', 'academic_cycle_id', 'school', 'course', 'year_level', 'batch',
-        'payroll_qualified', 'qualification_note',
+        'payroll_qualified', 'payrolled_at', 'payrolled_by', 'qualification_note',
         'qualification_decided_by', 'qualification_decided_at',
     ];
 
     protected function casts(): array
     {
-        return ['payroll_qualified' => 'boolean', 'qualification_decided_at' => 'datetime'];
+        return ['payroll_qualified' => 'boolean', 'qualification_decided_at' => 'datetime', 'payrolled_at' => 'datetime'];
     }
     public function student(): BelongsTo { return $this->belongsTo(Student::class); }
     public function academicCycle(): BelongsTo { return $this->belongsTo(AcademicCycle::class); }
     public function requirements(): HasOne { return $this->hasOne(StudentCycleRequirement::class); }
     public function decidedBy(): BelongsTo { return $this->belongsTo(User::class, 'qualification_decided_by'); }
+    public function payrolledBy(): BelongsTo { return $this->belongsTo(User::class, 'payrolled_by'); }
 
     public function requiredRequirementFields(string $type): array
     {
@@ -47,6 +48,11 @@ class StudentCycle extends Model
     public function isPayrollQualified(): bool
     {
         return $this->payroll_qualified;
+    }
+
+    public function isPayrolled(): bool
+    {
+        return $this->payrolled_at !== null;
     }
 
     public function isReadyForPayroll(string $type): bool

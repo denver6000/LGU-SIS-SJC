@@ -150,6 +150,20 @@ class ExampleTest extends TestCase
         $this->actingAs($user)->get("/payrolls?cycle_id={$cycle->id}")
             ->assertOk()
             ->assertSee('Ready Student')
-            ->assertSee('Renewal');
+            ->assertSee('Renewal')
+            ->assertSee('1st Semester');
+
+        $this->actingAs($user)->post("/payrolls/{$studentCycle->id}/mark-payrolled", ['type' => 'renewal'])
+            ->assertRedirectToRoute('payrolls.index', [
+                'school_year' => '2026-2027',
+                'semester_number' => 1,
+                'type' => 'renewal',
+                'status' => 'ready',
+            ]);
+        $this->assertDatabaseHas('student_cycles', ['id' => $studentCycle->id, 'payrolled_by' => $user->id]);
+        $this->actingAs($user)->get('/payrolls?school_year=2026-2027&semester_number=1&type=renewal&status=payrolled')
+            ->assertOk()->assertSee('Ready Student')->assertSee('Payrolled');
+        $this->actingAs($user)->post("/payrolls/{$studentCycle->id}/mark-payrolled", ['type' => 'renewal'])
+            ->assertStatus(409);
     }
 }
