@@ -35,6 +35,7 @@
 /public/build/
 /public/hot
 /public/storage
+/public/templates/~$*
 
 # Local databases and database dumps
 /database/*.sqlite
