@@ -57,6 +57,7 @@ table { width:100%; border-collapse:collapse; }
 th,td { padding:12px 10px; border-bottom:1px solid var(--line); text-align:left; }
 th { color:var(--text-soft); background:var(--surface-alt); font-size:.68rem; letter-spacing:.08em; text-transform:uppercase; }
 td { font-size:.88rem; } tr:hover td { background:#fbfcf8; } td a { font-weight:700; }
+.clickable-row { cursor:pointer; } .clickable-row:focus td { outline:2px solid var(--green); outline-offset:-2px; }
 .primary-button { display:inline-block; padding:10px 14px; color:#fff; background:var(--green); border:1px solid var(--green); border-radius:3px; cursor:pointer; text-decoration:none; font-weight:700; }
 .primary-button:hover { background:var(--green-deep); }
 .stack { display:grid; gap:16px; }

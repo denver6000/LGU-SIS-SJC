@@ -12,7 +12,7 @@
 @foreach($discrepancyRows as $row)
 @php($requiredFields = $row->requiredRequirementFields($row->student->payout_track))
 @php($missingFields = collect($requiredFields)->filter(fn($field) => !$row->requirements?->{$field})->map(fn($field) => str($field)->replace(['initial_', 'renewal_', '_'], ['', '', ' '])->title())->implode(', '))
-<tr><td>{{ $row->student->full_name }}</td><td>{{ $row->student->student_id }}</td><td>{{ ucfirst($row->student->payout_track) }}</td><td>{{ $missingFields }}</td><td><a href="{{ route('requirements.edit', [$row->student, 'cycle_id' => $cycle?->id, 'tab' => 'all', 'return_tab' => 'all']) }}">Manage requirements</a></td></tr>
+<tr class="clickable-row" tabindex="0" role="link" onclick="window.location='{{ route('requirements.edit', [$row->student, 'cycle_id' => $cycle?->id, 'tab' => 'all', 'return_tab' => 'all']) }}'" onkeydown="if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); window.location='{{ route('requirements.edit', [$row->student, 'cycle_id' => $cycle?->id, 'tab' => 'all', 'return_tab' => 'all']) }}'; }"><td><a href="{{ route('requirements.edit', [$row->student, 'cycle_id' => $cycle?->id, 'tab' => 'all', 'return_tab' => 'all']) }}">{{ $row->student->full_name }}</a></td><td>{{ $row->student->student_id }}</td><td>{{ ucfirst($row->student->payout_track) }}</td><td>{{ $missingFields }}</td><td><a href="{{ route('requirements.edit', [$row->student, 'cycle_id' => $cycle?->id, 'tab' => 'all', 'return_tab' => 'all']) }}">Manage requirements</a></td></tr>
 @endforeach
 </tbody></table></details>
 @endif
