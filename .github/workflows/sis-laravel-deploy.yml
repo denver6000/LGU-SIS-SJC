@@ -85,8 +85,9 @@ jobs:
           username: ${{ secrets.HOSTINGER_SSH_USER }}
           port: ${{ secrets.HOSTINGER_SSH_PORT }}
           key: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
-          source: release.tar.gz
-          target: ~/domains/sjc-sis.dmballesteros.com/sis-laravel/
+          source: ./release.tar.gz
+          target: /home/u970566273/domains/sjc-sis.dmballesteros.com/sis-laravel/
+          overwrite: true
 
       - name: Activate release on Hostinger
         uses: appleboy/ssh-action@v1.2.2
@@ -102,8 +103,10 @@ jobs:
             PHP_BIN=/opt/alt/php84/usr/bin/php
             test -x "$PHP_BIN"
             "$PHP_BIN" -v
-            tar -xzf release.tar.gz
-            rm -f release.tar.gz
+            RELEASE_ARCHIVE="$HOME/domains/sjc-sis.dmballesteros.com/sis-laravel/release.tar.gz"
+            test -f "$RELEASE_ARCHIVE"
+            tar -xzf "$RELEASE_ARCHIVE"
+            rm -f "$RELEASE_ARCHIVE"
             cp -a public/. ../public_html/
             sed -i "s#__DIR__.'/../vendor/autoload.php#__DIR__.'/../sis-laravel/vendor/autoload.php#" ../public_html/index.php
             sed -i "s#__DIR__.'/../bootstrap/app.php#__DIR__.'/../sis-laravel/bootstrap/app.php#" ../public_html/index.php
