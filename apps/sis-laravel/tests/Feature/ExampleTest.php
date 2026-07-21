@@ -84,7 +84,7 @@ class ExampleTest extends TestCase
     {
         $admin = User::factory()->create(['role' => 'admin', 'is_active' => true]);
         $encoder = User::factory()->create(['role' => 'encoder', 'is_active' => true]);
-        $cycle = AcademicCycle::create(['school_year' => '2026-2027', 'semester_number' => 1, 'status' => 'open']);
+        $cycle = AcademicCycle::firstOrCreate(['school_year' => '2026-2027', 'semester_number' => 1], ['status' => 'open']);
 
         $this->actingAs($encoder)->post('/students', [
             'student_id' => 'AUDIT001',
@@ -108,7 +108,7 @@ class ExampleTest extends TestCase
     public function test_student_history_separates_year_level_and_requirements_changes(): void
     {
         $admin = User::factory()->create(['role' => 'admin', 'is_active' => true]);
-        $cycle = AcademicCycle::create(['school_year' => '2026-2027', 'semester_number' => 1, 'status' => 'open']);
+        $cycle = AcademicCycle::firstOrCreate(['school_year' => '2026-2027', 'semester_number' => 1], ['status' => 'open']);
         $student = Student::create(['student_id' => 'HISTORY001', 'full_name' => 'History Student', 'payout_track' => 'initial']);
 
         $this->actingAs($admin)->put("/students/{$student->id}", [
@@ -137,7 +137,7 @@ class ExampleTest extends TestCase
     public function test_authenticated_staff_can_add_a_student_and_manage_requirements_separately(): void
     {
         $user = User::factory()->create(['role' => 'admin', 'is_active' => true]);
-        $cycle = AcademicCycle::create(['school_year' => '2026-2027', 'semester_number' => 1, 'status' => 'open']);
+        $cycle = AcademicCycle::firstOrCreate(['school_year' => '2026-2027', 'semester_number' => 1], ['status' => 'open']);
 
         $this->actingAs($user)->post('/students', [
             'student_id' => 'STU001',
@@ -167,7 +167,7 @@ class ExampleTest extends TestCase
     public function test_payrolls_only_shows_qualified_students_with_complete_requirements(): void
     {
         $user = User::factory()->create(['role' => 'admin', 'is_active' => true]);
-        $cycle = AcademicCycle::create(['school_year' => '2026-2027', 'semester_number' => 1, 'status' => 'open']);
+        $cycle = AcademicCycle::firstOrCreate(['school_year' => '2026-2027', 'semester_number' => 1], ['status' => 'open']);
         $student = Student::create(['student_id' => 'READY001', 'full_name' => 'Ready Student', 'payout_track' => 'renewal']);
         $studentCycle = $student->cycles()->create([
             'academic_cycle_id' => $cycle->id,
