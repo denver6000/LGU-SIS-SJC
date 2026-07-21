@@ -11,3 +11,4 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 import './payroll-export';
+import './payroll-recovery';

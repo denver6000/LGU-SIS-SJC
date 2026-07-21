@@ -13,7 +13,7 @@ class AuditUserActivity
     {
         $response = $next($request);
 
-        if ($request->user() && in_array($request->method(), ['POST', 'PUT', 'PATCH', 'DELETE'], true) && ! $request->routeIs('login.store', 'logout')) {
+        if ($request->user() && in_array($request->method(), ['POST', 'PUT', 'PATCH', 'DELETE'], true) && ! $request->routeIs('login.store', 'logout', 'payrolls.recovery.revert')) {
             $routeName = $request->route()?->getName() ?: $request->method().' '.$request->path();
             $safeKeys = collect($request->except(['_token', '_method', 'password', 'password_confirmation']))
                 ->keys()->take(100)->values()->all();

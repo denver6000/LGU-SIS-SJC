@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Models\AcademicCycle;
 use App\Models\ActivityLog;
 use App\Models\Student;
+use App\Models\StudentCycle;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
@@ -205,5 +206,32 @@ class ExampleTest extends TestCase
             ->assertOk()->assertSee('Ready Student')->assertSee('Payrolled');
         $this->actingAs($user)->post("/payrolls/{$studentCycle->id}/mark-payrolled", ['type' => 'renewal'])
             ->assertStatus(409);
+    }
+
+    public function test_payroll_recovery_is_admin_only_and_audited(): void
+    {
+        $admin = User::factory()->create(['role' => 'admin', 'is_active' => true]);
+        $encoder = User::factory()->create(['role' => 'encoder', 'is_active' => true]);
+        $cycle = AcademicCycle::firstOrCreate(['school_year' => '2026-2027', 'semester_number' => 2], ['status' => 'open']);
+        $student = Student::create(['student_id' => 'RECOVERY001', 'full_name' => 'Recovery Student', 'payout_track' => 'renewal']);
+        $studentCycle = StudentCycle::create([
+            'student_id' => $student->id,
+            'academic_cycle_id' => $cycle->id,
+            'payroll_qualified' => true,
+            'payrolled_at' => now(),
+            'payrolled_by' => $admin->id,
+        ]);
+
+        $this->actingAs($encoder)->get('/payrolls/recovery')->assertForbidden();
+        $this->actingAs($admin)->get('/payrolls/recovery?school_year=2026-2027&semester_number=2')
+            ->assertOk()->assertSee('Recovery Student')->assertSee('Revert payroll status');
+        $this->actingAs($admin)->post('/payrolls/recovery/revert', [
+            'cycle_id' => $cycle->id,
+            'student_cycle_ids' => [$studentCycle->id],
+            'reason' => 'Duplicate payroll entry correction',
+        ])->assertRedirectToRoute('payrolls.recovery', ['school_year' => '2026-2027', 'semester_number' => 2]);
+
+        $this->assertDatabaseHas('student_cycles', ['id' => $studentCycle->id, 'payrolled_at' => null, 'payrolled_by' => null]);
+        $this->assertDatabaseHas('activity_logs', ['action' => 'payrolls.revert', 'user_id' => $admin->id]);
     }
 }

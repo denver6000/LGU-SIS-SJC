@@ -13,8 +13,12 @@ function downloadBlob(filename, blob) {
     const link = document.createElement('a');
     link.href = url;
     link.download = filename;
+    link.style.display = 'none';
+    document.body.appendChild(link);
     link.click();
-    URL.revokeObjectURL(url);
+    link.remove();
+    // Give the browser time to start reading the object URL before releasing it.
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 function chunkStudents(students) {
@@ -154,18 +158,21 @@ async function exportPayrollFiles(students, metadata, filenamePrefix) {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
-    const selectAllButton = document.querySelector('[data-payroll-select-all]');
+    const selectAllButtons = [...document.querySelectorAll('[data-payroll-select-all]')];
     const studentCheckboxes = [...document.querySelectorAll('[data-payroll-student]')];
-    if (selectAllButton) {
+    if (selectAllButtons.length) {
         const syncSelectAllButton = () => {
             const allSelected = studentCheckboxes.length > 0 && studentCheckboxes.every((checkbox) => checkbox.checked);
-            selectAllButton.textContent = allSelected ? 'Deselect all' : 'Select all';
+            selectAllButtons.forEach((button) => {
+                button.textContent = allSelected ? 'Deselect all' : 'Select all';
+                button.setAttribute('aria-pressed', allSelected ? 'true' : 'false');
+            });
         };
-        selectAllButton.addEventListener('click', () => {
+        selectAllButtons.forEach((button) => button.addEventListener('click', () => {
             const shouldSelect = !studentCheckboxes.length || !studentCheckboxes.every((checkbox) => checkbox.checked);
             studentCheckboxes.forEach((checkbox) => { checkbox.checked = shouldSelect; });
             syncSelectAllButton();
-        });
+        }));
         studentCheckboxes.forEach((checkbox) => checkbox.addEventListener('change', syncSelectAllButton));
         syncSelectAllButton();
     }
@@ -176,14 +183,16 @@ document.addEventListener('DOMContentLoaded', () => {
         const selectedIds = new Set([...document.querySelectorAll('[data-payroll-student]:checked')].map((input) => input.value));
         const allRows = JSON.parse(document.querySelector('#payroll-export-data')?.textContent || '[]');
         const students = allRows.filter((student) => selectedIds.has(String(student.student_id)));
-        const date = document.querySelector('[name="date_of_filing"]')?.value || '';
+        const date = document.querySelector('[name="date_of_filing"]')?.value?.trim() || '';
+        const semester = document.querySelector('[name="export_semester"]')?.value?.trim() || '';
         if (!date) return alert('Fill in the Date Of Filing before creating payroll files.');
+        if (!semester) return alert('Type the semester for the export before creating payroll files.');
         if (!students.length) return alert('Select at least one student before creating payroll files.');
         button.disabled = true;
         button.textContent = 'Creating...';
         try {
             const cycle = document.querySelector('#payroll-export-data')?.dataset || {};
-            await exportPayrollFiles(students, { date_of_filing: date, school_year: cycle.schoolYear, sem_number: cycle.semNumber }, `payroll-${new Date().toISOString().slice(0, 10)}`);
+            await exportPayrollFiles(students, { date_of_filing: date, school_year: cycle.schoolYear, sem_number: semester }, `payroll-${new Date().toISOString().slice(0, 10)}`);
         } catch (error) {
             alert(error instanceof Error ? error.message : 'Unable to create payroll files.');
         } finally {
