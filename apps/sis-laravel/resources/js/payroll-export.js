@@ -154,18 +154,21 @@ async function exportPayrollFiles(students, metadata, filenamePrefix) {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
-    const selectAllButton = document.querySelector('[data-payroll-select-all]');
+    const selectAllButtons = [...document.querySelectorAll('[data-payroll-select-all]')];
     const studentCheckboxes = [...document.querySelectorAll('[data-payroll-student]')];
-    if (selectAllButton) {
+    if (selectAllButtons.length) {
         const syncSelectAllButton = () => {
             const allSelected = studentCheckboxes.length > 0 && studentCheckboxes.every((checkbox) => checkbox.checked);
-            selectAllButton.textContent = allSelected ? 'Deselect all' : 'Select all';
+            selectAllButtons.forEach((button) => {
+                button.textContent = allSelected ? 'Deselect all' : 'Select all';
+                button.setAttribute('aria-pressed', allSelected ? 'true' : 'false');
+            });
         };
-        selectAllButton.addEventListener('click', () => {
+        selectAllButtons.forEach((button) => button.addEventListener('click', () => {
             const shouldSelect = !studentCheckboxes.length || !studentCheckboxes.every((checkbox) => checkbox.checked);
             studentCheckboxes.forEach((checkbox) => { checkbox.checked = shouldSelect; });
             syncSelectAllButton();
-        });
+        }));
         studentCheckboxes.forEach((checkbox) => checkbox.addEventListener('change', syncSelectAllButton));
         syncSelectAllButton();
     }
