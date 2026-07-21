@@ -42,7 +42,12 @@ class PayrollController extends Controller
             ->filter(fn (StudentCycle $studentCycle) => $studentCycle->isReadyForPayroll($studentCycle->student->payout_track))
             ->filter(fn (StudentCycle $studentCycle) => $status === 'payrolled' ? $studentCycle->isPayrolled() : ! $studentCycle->isPayrolled());
 
-        return view('payrolls.index', compact('cycles', 'cycle', 'type', 'status', 'schoolYears', 'schoolYear', 'semesterNumber', 'payrollRows', 'qualifiedCycles'));
+        $discrepancyRows = $qualifiedCycles->filter(fn (StudentCycle $studentCycle) =>
+            ! $studentCycle->isPayrolled()
+            && ! $studentCycle->isReadyForPayroll($studentCycle->student->payout_track)
+        );
+
+        return view('payrolls.index', compact('cycles', 'cycle', 'type', 'status', 'schoolYears', 'schoolYear', 'semesterNumber', 'payrollRows', 'qualifiedCycles', 'discrepancyRows'));
     }
 
     public function markPayrolled(Request $request, StudentCycle $studentCycle)

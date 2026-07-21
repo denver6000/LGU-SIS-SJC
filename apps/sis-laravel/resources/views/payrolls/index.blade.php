@@ -6,15 +6,85 @@
 <div class="timeline-tabs"><a class="{{ $status === 'ready' ? 'active' : '' }}" href="{{ route('payrolls.index', request()->except('status') + ['status' => 'ready']) }}">Ready for payroll</a><a class="{{ $status === 'payrolled' ? 'active' : '' }}" href="{{ route('payrolls.index', request()->except('status') + ['status' => 'payrolled']) }}">Payrolled</a></div>
 <div class="timeline-tabs"><a href="{{ route('payrolls.recovery') }}">Admin: Payroll recovery</a></div>
 <div class="payroll-summary"><span><strong>{{ $payrollRows->count() }}</strong> {{ $status === 'payrolled' ? 'payrolled' : 'ready for payroll' }}</span></div>
-<div class="form-grid payroll-metadata-grid">@if($status === 'ready')<label>Date Of Filing<input type="date" name="date_of_filing"></label><div><button class="secondary-button" type="button" data-payroll-select-all>Select all</button> <button class="primary-button" type="button" data-payroll-export>Create Payroll Files</button></div>@endif</div>
-<div class="table-card"><table><thead><tr><th>@if($status === 'ready')<button class="text-button" type="button" data-payroll-select-all>Select all</button>@else Status @endif</th><th>Student</th><th>Student ID</th><th>Payout type</th><th>School</th><th>Requirements</th><th>Payroll state</th></tr></thead><tbody>
+@if($status === 'ready' && $discrepancyRows->isNotEmpty())
+<div class="flash error"><strong>{{ $discrepancyRows->count() }} qualified candidate(s) need attention.</strong> They are manually qualified but have incomplete requirements. <a href="#payroll-discrepancies">Review discrepancies</a></div>
+<details id="payroll-discrepancies" class="table-card" open><summary><strong>Review discrepancies ({{ $discrepancyRows->count() }})</strong></summary><table><thead><tr><th>Student</th><th>Student ID</th><th>Payout type</th><th>Missing requirements</th><th></th></tr></thead><tbody>
+@foreach($discrepancyRows as $row)
+@php
+    $requiredFields = $row->requiredRequirementFields($row->student->payout_track);
+    $missingFields = collect($requiredFields)
+        ->filter(fn ($field) => ! $row->requirements?->{$field})
+        ->map(fn ($field) => str($field)->replace(['initial_', 'renewal_', '_'], ['', '', ' '])->title())
+        ->implode(', ');
+@endphp
+<tr class="clickable-row" tabindex="0" role="link" onclick="window.location='{{ route('requirements.edit', [$row->student, 'cycle_id' => $cycle?->id, 'tab' => 'all', 'return_tab' => 'all']) }}'" onkeydown="if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); window.location='{{ route('requirements.edit', [$row->student, 'cycle_id' => $cycle?->id, 'tab' => 'all', 'return_tab' => 'all']) }}'; }"><td><a href="{{ route('requirements.edit', [$row->student, 'cycle_id' => $cycle?->id, 'tab' => 'all', 'return_tab' => 'all']) }}">{{ $row->student->full_name }}</a></td><td>{{ $row->student->student_id }}</td><td>{{ ucfirst($row->student->payout_track) }}</td><td>{{ $missingFields }}</td><td><a href="{{ route('requirements.edit', [$row->student, 'cycle_id' => $cycle?->id, 'tab' => 'all', 'return_tab' => 'all']) }}">Manage requirements</a></td></tr>
+@endforeach
+</tbody></table></details>
+@endif
+<div class="form-grid payroll-metadata-grid">
+    @if ($status === 'ready')
+        <label>Date Of Filing<input type="date" name="date_of_filing"></label>
+        <div>
+            <button class="secondary-button" type="button" data-payroll-select-all>Select all</button>
+            <button class="primary-button" type="button" data-payroll-export>Create Payroll Files</button>
+        </div>
+    @endif
+</div>
+<div class="table-card">
+    <table>
+        <thead>
+            <tr>
+                <th>
+                    @if ($status === 'ready')
+                        <button class="text-button" type="button" data-payroll-select-all>Select all</button>
+                    @else
+                        Status
+                    @endif
+                </th>
+                <th>Student</th>
+                <th>Student ID</th>
+                <th>Payout type</th>
+                <th>School</th>
+                <th>Requirements</th>
+                <th>Payroll state</th>
+            </tr>
+        </thead>
+        <tbody>
 @forelse($payrollRows as $studentCycle)
 @php $type = $studentCycle->student->payout_track; $progress = $studentCycle->requirementProgress($type); @endphp
-<tr><td>@if($status === 'ready')<input type="checkbox" data-payroll-student value="{{ $studentCycle->student->student_id }}">@else<span class="status-pill qualified">Payrolled</span>@endif</td><td>{{ $studentCycle->student->full_name }}</td><td>{{ $studentCycle->student->student_id }}</td><td>{{ ucfirst($type) }}</td><td>{{ $studentCycle->school ?: '—' }}</td><td>{{ $progress['complete'] }}/{{ $progress['total'] }} complete</td><td>@if($status === 'ready')<form method="POST" action="{{ route('payrolls.mark-payrolled', $studentCycle) }}" onsubmit="return confirm('Mark this student as payrolled for {{ $cycle?->label() }}?');">@csrf<input type="hidden" name="type" value="{{ $type }}"><button class="secondary-button compact" type="submit">Mark payrolled</button></form>@else<time datetime="{{ $studentCycle->payrolled_at?->toIso8601String() }}">{{ $studentCycle->payrolled_at?->format('Y-m-d H:i:s T') }}</time><br><span class="muted">{{ $studentCycle->payrolledBy?->name ?? 'Recorded user unavailable' }}</span>@endif</td></tr>
+            <tr>
+                <td>
+                    @if ($status === 'ready')
+                        <input type="checkbox" data-payroll-student value="{{ $studentCycle->student->student_id }}">
+                    @else
+                        <span class="status-pill qualified">Payrolled</span>
+                    @endif
+                </td>
+                <td>{{ $studentCycle->student->full_name }}</td>
+                <td>{{ $studentCycle->student->student_id }}</td>
+                <td>{{ ucfirst($type) }}</td>
+                <td>{{ $studentCycle->school ?: '—' }}</td>
+                <td>{{ $progress['complete'] }}/{{ $progress['total'] }} complete</td>
+                <td>
+                    @if ($status === 'ready')
+                        <form method="POST" action="{{ route('payrolls.mark-payrolled', $studentCycle) }}" onsubmit="return confirm('Mark this student as payrolled for {{ $cycle?->label() }}?');">
+                            @csrf
+                            <input type="hidden" name="type" value="{{ $type }}">
+                            <button class="secondary-button compact" type="submit">Mark payrolled</button>
+                        </form>
+                    @else
+                        <time datetime="{{ $studentCycle->payrolled_at?->toIso8601String() }}">{{ $studentCycle->payrolled_at?->format('Y-m-d H:i:s T') }}</time>
+                        <br>
+                        <span class="muted">{{ $studentCycle->payrolledBy?->name ?? 'Recorded user unavailable' }}</span>
+                    @endif
+                </td>
+            </tr>
 @empty
 <tr><td colspan="7">No {{ $status === 'payrolled' ? 'payrolled' : 'ready' }} students for this cycle.</td></tr>
 @endforelse
-</tbody></table></div>
+        </tbody>
+    </table>
+</div>
 @php
     $exportRows = $payrollRows->map(function ($studentCycle) {
         return [
