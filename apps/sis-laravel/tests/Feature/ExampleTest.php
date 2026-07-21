@@ -70,14 +70,22 @@ class ExampleTest extends TestCase
         $this->assertDatabaseHas('users', ['id' => $encoder->id, 'name' => 'Renamed Encoder']);
     }
 
-    public function test_encoder_cannot_access_payroll_or_edit_student_profile(): void
+    public function test_encoder_cannot_access_payroll_but_can_edit_student_profile(): void
     {
         $user = User::factory()->create(['role' => 'encoder', 'is_active' => true]);
         $student = Student::create(['student_id' => 'STU002', 'full_name' => 'Restricted Student', 'payout_track' => 'initial']);
+        $cycle = AcademicCycle::firstOrCreate(['school_year' => '2026-2027', 'semester_number' => 1], ['status' => 'open']);
 
         $this->actingAs($user)->get('/payrolls')->assertForbidden();
-        $this->actingAs($user)->get("/students/{$student->id}/edit")->assertForbidden();
-        $this->actingAs($user)->put("/students/{$student->id}", [])->assertForbidden();
+        $this->actingAs($user)->get("/students/{$student->id}/edit")->assertOk();
+        $this->actingAs($user)->put("/students/{$student->id}", [
+            'student_id' => $student->student_id,
+            'full_name' => 'Updated Encoder Student',
+            'payout_track' => 'initial',
+            'cycle_id' => $cycle->id,
+        ])->assertRedirectToRoute('students.index');
+
+        $this->assertDatabaseHas('students', ['id' => $student->id, 'full_name' => 'Updated Encoder Student']);
     }
 
     public function test_activity_log_is_admin_only_and_records_write_actions(): void
