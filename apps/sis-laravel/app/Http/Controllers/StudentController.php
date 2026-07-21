@@ -42,7 +42,6 @@ class StudentController extends Controller
     {
         [$studentData, $cycleData] = $this->validated($request, true);
         $student = Student::create($studentData);
-        $cycleData['cycle_id'] = $this->resolveCycle($cycleData)->id;
         $cycle = $this->saveCycle($student, $cycleData, $request);
         if (filled($cycle->year_level)) {
             StudentHistory::create([
@@ -114,28 +113,14 @@ class StudentController extends Controller
             'year_level' => ['nullable', 'string', 'max:50'], 'batch' => ['nullable', 'string', 'max:50'],
         ];
         if ($creating) {
-            $rules['cycle_id'] = ['nullable', 'exists:academic_cycles,id'];
-            $rules['school_year'] = ['required_without:cycle_id', 'nullable', 'regex:/^\d{4}-\d{4}$/'];
-            $rules['semester_number'] = ['required_without:cycle_id', 'nullable', 'integer', 'in:1,2'];
+            $rules['cycle_id'] = ['required', 'exists:academic_cycles,id'];
         } else {
             $rules['cycle_id'] = ['required', 'exists:academic_cycles,id'];
         }
         $data = $request->validate($rules);
         $studentData = collect($data)->only(['student_id', 'full_name', 'payout_track', 'student_number', 'barangay', 'address', 'phone_number'])->all();
-        $cycleData = collect($data)->only(['cycle_id', 'school_year', 'semester_number', 'school', 'course', 'year_level', 'batch'])->all();
+        $cycleData = collect($data)->only(['cycle_id', 'school', 'course', 'year_level', 'batch'])->all();
         return [$studentData, $cycleData];
-    }
-
-    private function resolveCycle(array $cycleData): AcademicCycle
-    {
-        if (filled($cycleData['cycle_id'] ?? null)) {
-            return AcademicCycle::findOrFail($cycleData['cycle_id']);
-        }
-
-        return AcademicCycle::firstOrCreate(
-            ['school_year' => $cycleData['school_year'], 'semester_number' => $cycleData['semester_number']],
-            ['status' => 'open'],
-        );
     }
 
     private function saveCycle(Student $student, array $cycleData, Request $request)

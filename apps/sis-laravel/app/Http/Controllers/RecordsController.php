@@ -3,8 +3,10 @@
 namespace App\Http\Controllers;
 
 use App\Models\SisOption;
+use App\Models\AcademicCycle;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
+use Illuminate\Validation\Rule;
 
 class RecordsController extends Controller
 {
@@ -20,7 +22,23 @@ class RecordsController extends Controller
             'schools' => $options->get('schools', collect()),
             'batches' => $options->get('batches', collect()),
             'courses' => $options->get('courses', collect()),
+            'cycles' => AcademicCycle::orderByDesc('school_year')->orderBy('semester_number')->get(),
         ]);
+    }
+
+    public function storeCycle(Request $request)
+    {
+        $data = $request->validate([
+            'school_year' => ['required', 'regex:/^\d{4}-\d{4}$/'],
+            'semester_number' => [
+                'required', 'integer', 'in:1,2',
+                Rule::unique('academic_cycles', 'semester_number')->where(fn ($query) => $query->where('school_year', $request->string('school_year')->value())),
+            ],
+        ]);
+
+        AcademicCycle::create($data + ['status' => 'open']);
+
+        return redirect()->route('records.index')->with('success', 'Academic cycle added.');
     }
 
     public function store(Request $request)
