@@ -11,9 +11,26 @@ use Illuminate\Validation\Rule;
 
 class StudentController extends Controller
 {
-    public function index()
+    public function index(Request $request)
     {
-        return view('students.index', ['students' => Student::with('cycles.academicCycle')->orderBy('full_name')->get()]);
+        $search = trim($request->string('search')->value());
+        $students = Student::with('cycles.academicCycle')
+            ->when($search !== '', function ($query) use ($search) {
+                $query->where(function ($students) use ($search) {
+                    $students->where('full_name', 'like', "%{$search}%")
+                        ->orWhere('student_id', 'like', "%{$search}%")
+                        ->orWhere('student_number', 'like', "%{$search}%")
+                        ->orWhere('address', 'like', "%{$search}%")
+                        ->orWhereHas('cycles', function ($cycles) use ($search) {
+                            $cycles->where('school', 'like', "%{$search}%")
+                                ->orWhere('batch', 'like', "%{$search}%");
+                        });
+                });
+            })
+            ->orderBy('full_name')
+            ->get();
+
+        return view('students.index', compact('students', 'search'));
     }
 
     public function create()
@@ -91,10 +108,15 @@ class StudentController extends Controller
             'student_id' => ['required', 'string', 'max:50', Rule::unique('students', 'student_id')->ignore($student?->id)],
             'full_name' => ['required', 'string', 'max:255'], 'payout_track' => ['required', 'in:initial,renewal'], 'student_number' => ['nullable', 'string', 'max:100'],
             'barangay' => ['nullable', 'string', 'max:255'], 'address' => ['nullable', 'string'],
-            'phone_number' => ['nullable', 'string', 'max:50'], 'cycle_id' => ['required', 'exists:academic_cycles,id'],
+            'phone_number' => ['nullable', 'string', 'max:50'],
             'school' => ['nullable', 'string', 'max:255'], 'course' => ['nullable', 'string', 'max:255'],
             'year_level' => ['nullable', 'string', 'max:50'], 'batch' => ['nullable', 'string', 'max:50'],
         ];
+        if ($creating) {
+            $rules['cycle_id'] = ['required', 'exists:academic_cycles,id'];
+        } else {
+            $rules['cycle_id'] = ['required', 'exists:academic_cycles,id'];
+        }
         $data = $request->validate($rules);
         $studentData = collect($data)->only(['student_id', 'full_name', 'payout_track', 'student_number', 'barangay', 'address', 'phone_number'])->all();
         $cycleData = collect($data)->only(['cycle_id', 'school', 'course', 'year_level', 'batch'])->all();

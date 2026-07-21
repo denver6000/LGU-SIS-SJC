@@ -14,8 +14,14 @@
 <label>Address<textarea name="address">{{ old('address', $student->address) }}</textarea></label>
 </div></div>
 <div class="form-section"><h2>Academic cycle</h2><div class="form-grid">
-<label>School year / semester<select name="cycle_id" required @if($editing) onchange="window.location='{{ route('students.edit', $student) }}?cycle_id='+this.value" @endif>
+@if($editing)
+<label>School year / semester<select name="cycle_id" required onchange="window.location='{{ route('students.edit', $student) }}?cycle_id='+this.value">
 @foreach($cycles as $cycle)<option value="{{ $cycle->id }}" @selected(old('cycle_id', $selectedCycle?->academic_cycle_id) == $cycle->id)>{{ $cycle->label() }}</option>@endforeach</select></label>
+@else
+<label>School year / semester<select name="cycle_id" required>
+@foreach($cycles as $cycle)<option value="{{ $cycle->id }}" @selected(old('cycle_id') == $cycle->id)>{{ $cycle->label() }}</option>@endforeach</select>
+@if($cycles->isEmpty())<span class="muted">No cycles exist. Add one in <a href="{{ route('records.index') }}">Records Management</a> first.</span>@endif</label>
+@endif
 <label>School<select name="school"><option value="">Select school</option>@foreach($schools as $school)<option value="{{ $school }}" @selected(old('school', $selectedCycle?->school) === $school)>{{ $school }}</option>@endforeach</select></label>
 <label>Course<select name="course"><option value="">Select course</option>@foreach($courses as $course)<option value="{{ $course }}" @selected(old('course', $selectedCycle?->course) === $course)>{{ $course }}</option>@endforeach</select></label>
 <label>Year level<input name="year_level" value="{{ old('year_level', $selectedCycle?->year_level) }}"></label>
