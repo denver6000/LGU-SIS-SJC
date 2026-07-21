@@ -40,6 +40,8 @@ Route::middleware(['auth', 'role:admin,encoder'])->group(function () {
 
 Route::middleware(['auth', 'role:admin'])->group(function () {
     Route::get('/payrolls', [PayrollController::class, 'index'])->name('payrolls.index');
+    Route::get('/payrolls/recovery', [PayrollController::class, 'recovery'])->name('payrolls.recovery');
+    Route::post('/payrolls/recovery/revert', [PayrollController::class, 'revert'])->name('payrolls.recovery.revert');
     Route::post('/payrolls/{studentCycle}/mark-payrolled', [PayrollController::class, 'markPayrolled'])->name('payrolls.mark-payrolled');
     Route::get('/activity', [ActivityLogController::class, 'index'])->name('activity.index');
 });
