@@ -13,8 +13,12 @@ function downloadBlob(filename, blob) {
     const link = document.createElement('a');
     link.href = url;
     link.download = filename;
+    link.style.display = 'none';
+    document.body.appendChild(link);
     link.click();
-    URL.revokeObjectURL(url);
+    link.remove();
+    // Give the browser time to start reading the object URL before releasing it.
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 function chunkStudents(students) {

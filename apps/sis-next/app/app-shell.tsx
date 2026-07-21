@@ -706,7 +706,10 @@ function comparePayrollStudents(left: Student, right: Student) {
 }
 
 function csvCell(value: unknown) {
-  return `"${String(value ?? "").replaceAll('"', '""')}"`;
+  const text = String(value ?? "");
+  // Prevent spreadsheet programs from interpreting exported student data as formulas.
+  const safeText = /^[=+\-@]/.test(text) ? `'${text}` : text;
+  return `"${safeText.replaceAll('"', '""')}"`;
 }
 
 function formatDateTime(value?: string) {
@@ -773,7 +776,7 @@ function exportStudentsCsv(students: Student[]) {
     student.claimed ? "Yes" : "No"
   ]);
 
-  const csv = [headers, ...rows].map((row) => row.map(csvCell).join(",")).join("\n");
+  const csv = "\uFEFF" + [headers, ...rows].map((row) => row.map(csvCell).join(",")).join("\r\n") + "\r\n";
   downloadTextFile("students-export.csv", "text/csv;charset=utf-8", csv);
 }
 
