@@ -94,10 +94,15 @@ function replaceCellXml(sheetXml, address, value) {
     const current = sheetXml.match(pattern)?.[0];
     if (!current) throw new Error(`Payroll Excel template is missing expected cell ${address}.`);
     const openingTag = current.slice(0, current.indexOf('>') + 1);
-    const attrs = openingTag.slice(2, -1).replace(/\s+t="[^"]*"/, '');
-    if (value === '') return sheetXml.replace(pattern, `<c${attrs}/>`);
-    if (typeof value === 'number') return sheetXml.replace(pattern, `<c${attrs}><v>${value}</v></c>`);
-    return sheetXml.replace(pattern, `<c${attrs} t="inlineStr"><is><t xml:space="preserve">${escapeXml(value)}</t></is></c>`);
+    const attrs = openingTag
+        .replace(/^<c\b/, '')
+        .replace(/\/?>$/, '')
+        .replace(/\s+t="[^"]*"/g, '')
+        .trim();
+    const cellStart = attrs ? '<c ' + attrs : '<c';
+    if (value === '') return sheetXml.replace(pattern, cellStart + '/>');
+    if (typeof value === 'number') return sheetXml.replace(pattern, cellStart + '><v>' + value + '</v></c>');
+    return sheetXml.replace(pattern, cellStart + ' t="inlineStr"><is><t xml:space="preserve">' + escapeXml(value) + '</t></is></c>');
 }
 
 async function buildWordBlob(students, metadata) {
