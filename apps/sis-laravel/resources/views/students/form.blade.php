@@ -15,7 +15,7 @@
 </div></div>
 <div class="form-section"><h2>Academic cycle</h2><div class="form-grid">
 @if($editing)
-<label>School year / semester<select name="cycle_id" required onchange="window.location='{{ route('students.edit', $student) }}?cycle_id='+this.value">
+<label>School year / semester<select name="cycle_id" required data-cycle-select data-edit-url="{{ route('students.edit', $student) }}">
 @foreach($cycles as $cycle)<option value="{{ $cycle->id }}" @selected(old('cycle_id', $selectedCycle?->academic_cycle_id) == $cycle->id)>{{ $cycle->label() }}</option>@endforeach</select></label>
 @else
 <label>School year / semester<select name="cycle_id" required>
