@@ -154,6 +154,22 @@ async function exportPayrollFiles(students, metadata, filenamePrefix) {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
+    const selectAllButton = document.querySelector('[data-payroll-select-all]');
+    const studentCheckboxes = [...document.querySelectorAll('[data-payroll-student]')];
+    if (selectAllButton) {
+        const syncSelectAllButton = () => {
+            const allSelected = studentCheckboxes.length > 0 && studentCheckboxes.every((checkbox) => checkbox.checked);
+            selectAllButton.textContent = allSelected ? 'Deselect all' : 'Select all';
+        };
+        selectAllButton.addEventListener('click', () => {
+            const shouldSelect = !studentCheckboxes.length || !studentCheckboxes.every((checkbox) => checkbox.checked);
+            studentCheckboxes.forEach((checkbox) => { checkbox.checked = shouldSelect; });
+            syncSelectAllButton();
+        });
+        studentCheckboxes.forEach((checkbox) => checkbox.addEventListener('change', syncSelectAllButton));
+        syncSelectAllButton();
+    }
+
     const button = document.querySelector('[data-payroll-export]');
     if (!button) return;
     button.addEventListener('click', async () => {
