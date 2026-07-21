@@ -23,6 +23,8 @@ Route::middleware(['auth', 'role:admin,encoder'])->group(function () {
     Route::get('/students', [StudentController::class, 'index'])->name('students.index');
     Route::get('/students/create', [StudentController::class, 'create'])->name('students.create');
     Route::post('/students', [StudentController::class, 'store'])->name('students.store');
+    Route::get('/students/{student}/edit', [StudentController::class, 'edit'])->name('students.edit');
+    Route::put('/students/{student}', [StudentController::class, 'update'])->name('students.update');
     Route::get('/requirements', [RequirementsController::class, 'index'])->name('requirements.index');
     Route::get('/requirements/students/{student}/edit', [RequirementsController::class, 'edit'])->name('requirements.edit');
     Route::put('/requirements/students/{student}', [RequirementsController::class, 'update'])->name('requirements.update');
@@ -37,8 +39,6 @@ Route::middleware(['auth', 'role:admin,encoder'])->group(function () {
 });
 
 Route::middleware(['auth', 'role:admin'])->group(function () {
-    Route::get('/students/{student}/edit', [StudentController::class, 'edit'])->name('students.edit');
-    Route::put('/students/{student}', [StudentController::class, 'update'])->name('students.update');
     Route::get('/payrolls', [PayrollController::class, 'index'])->name('payrolls.index');
     Route::post('/payrolls/{studentCycle}/mark-payrolled', [PayrollController::class, 'markPayrolled'])->name('payrolls.mark-payrolled');
     Route::get('/activity', [ActivityLogController::class, 'index'])->name('activity.index');
