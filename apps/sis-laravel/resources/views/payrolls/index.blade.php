@@ -1,7 +1,18 @@
 @extends('layouts.app')
 @section('content')
 <div class="page-heading"><div><p class="eyebrow">Payrolls</p><h1>Payroll preparation</h1><p class="muted">Qualified students with complete submitted requirements for the selected cycle.</p></div></div>
-<form method="GET" class="timeline-toolbar"><label>School year<select name="school_year" onchange="this.form.submit()">@foreach($schoolYears as $year)<option value="{{ $year }}" @selected($schoolYear === $year)>{{ $year }}</option>@endforeach</select></label><label>Semester<select name="semester_number" onchange="this.form.submit()"><option value="1" @selected($semesterNumber === 1)>1st Semester</option><option value="2" @selected($semesterNumber === 2)>2nd Semester</option></select></label><input type="hidden" name="type" value="{{ $type }}"><input type="hidden" name="status" value="{{ $status }}"></form>
+<form method="GET" class="timeline-toolbar">
+    <label>School year<select name="school_year" onchange="this.form.submit()">@foreach($schoolYears as $year)<option value="{{ $year }}" @selected($schoolYear === $year)>{{ $year }}</option>@endforeach</select></label>
+    <label>Semester<select name="semester_number" onchange="this.form.submit()"><option value="1" @selected($semesterNumber === 1)>1st Semester</option><option value="2" @selected($semesterNumber === 2)>2nd Semester</option></select></label>
+    <label>Search student<input name="search" value="{{ $search }}" placeholder="Name, ID, address, barangay"></label>
+    <label>School<input name="school" value="{{ $school }}" placeholder="School"></label>
+    <label>Batch<input name="batch" value="{{ $batch }}" placeholder="Batch"></label>
+    <label>Year level<input name="year_level" value="{{ $yearLevel }}" placeholder="e.g. 2nd Year"></label>
+    <input type="hidden" name="type" value="{{ $type }}">
+    <input type="hidden" name="status" value="{{ $status }}">
+    <button class="primary-button" type="submit">Filter</button>
+    @if($search !== '' || $school !== '' || $batch !== '' || $yearLevel !== '')<a href="{{ route('payrolls.index', ['school_year' => $schoolYear, 'semester_number' => $semesterNumber, 'type' => $type, 'status' => $status]) }}">Clear filters</a>@endif
+</form>
 <div class="timeline-tabs"><a class="{{ $type === 'all' ? 'active' : '' }}" href="{{ route('payrolls.index', request()->except('type') + ['type' => 'all']) }}">All payrolls</a><a class="{{ $type === 'initial' ? 'active' : '' }}" href="{{ route('payrolls.index', request()->except('type') + ['type' => 'initial']) }}">Initial payroll</a><a class="{{ $type === 'renewal' ? 'active' : '' }}" href="{{ route('payrolls.index', request()->except('type') + ['type' => 'renewal']) }}">Renewal payroll</a></div>
 <div class="timeline-tabs"><a class="{{ $status === 'ready' ? 'active' : '' }}" href="{{ route('payrolls.index', request()->except('status') + ['status' => 'ready']) }}">Ready for payroll</a><a class="{{ $status === 'payrolled' ? 'active' : '' }}" href="{{ route('payrolls.index', request()->except('status') + ['status' => 'payrolled']) }}">Payrolled</a></div>
 <div class="timeline-tabs"><a href="{{ route('payrolls.recovery') }}">Admin: Payroll recovery</a></div>

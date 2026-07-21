@@ -30,11 +30,24 @@ class PayrollController extends Controller
             ? $request->string('type')->value()
             : 'all';
         $status = $request->string('status')->value() === 'payrolled' ? 'payrolled' : 'ready';
+        $search = trim($request->string('search')->value());
+        $school = trim($request->string('school')->value());
+        $batch = trim($request->string('batch')->value());
+        $yearLevel = trim($request->string('year_level')->value());
 
         $qualifiedCycles = StudentCycle::with(['student', 'requirements', 'academicCycle', 'payrolledBy'])
             ->when($cycle, fn ($query) => $query->where('academic_cycle_id', $cycle->id))
             ->where('payroll_qualified', true)
             ->when($type !== 'all', fn ($query) => $query->whereHas('student', fn ($students) => $students->where('payout_track', $type)))
+            ->when($search !== '', fn ($query) => $query->whereHas('student', fn ($students) => $students
+                ->where('full_name', 'like', "%{$search}%")
+                ->orWhere('student_id', 'like', "%{$search}%")
+                ->orWhere('student_number', 'like', "%{$search}%")
+                ->orWhere('address', 'like', "%{$search}%")
+                ->orWhere('barangay', 'like', "%{$search}%")))
+            ->when($school !== '', fn ($query) => $query->where('school', 'like', "%{$school}%"))
+            ->when($batch !== '', fn ($query) => $query->where('batch', 'like', "%{$batch}%"))
+            ->when($yearLevel !== '', fn ($query) => $query->where('year_level', 'like', "%{$yearLevel}%"))
             ->orderBy('id')
             ->get();
 
@@ -47,7 +60,7 @@ class PayrollController extends Controller
             && ! $studentCycle->isReadyForPayroll($studentCycle->student->payout_track)
         );
 
-        return view('payrolls.index', compact('cycles', 'cycle', 'type', 'status', 'schoolYears', 'schoolYear', 'semesterNumber', 'payrollRows', 'qualifiedCycles', 'discrepancyRows'));
+        return view('payrolls.index', compact('cycles', 'cycle', 'type', 'status', 'schoolYears', 'schoolYear', 'semesterNumber', 'search', 'school', 'batch', 'yearLevel', 'payrollRows', 'qualifiedCycles', 'discrepancyRows'));
     }
 
     public function markPayrolled(Request $request, StudentCycle $studentCycle)
