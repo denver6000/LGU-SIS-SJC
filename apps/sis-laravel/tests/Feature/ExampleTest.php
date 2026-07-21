@@ -234,4 +234,36 @@ class ExampleTest extends TestCase
         $this->assertDatabaseHas('student_cycles', ['id' => $studentCycle->id, 'payrolled_at' => null, 'payrolled_by' => null]);
         $this->assertDatabaseHas('activity_logs', ['action' => 'payrolls.revert', 'user_id' => $admin->id]);
     }
+
+    public function test_cycle_correction_is_admin_only_and_merges_then_removes_source_records(): void
+    {
+        $admin = User::factory()->create(['role' => 'admin', 'is_active' => true]);
+        $encoder = User::factory()->create(['role' => 'encoder', 'is_active' => true]);
+        $sourceCycle = AcademicCycle::firstOrCreate(['school_year' => '2035-2036', 'semester_number' => 1], ['status' => 'open']);
+        $targetCycle = AcademicCycle::firstOrCreate(['school_year' => '2026-2027', 'semester_number' => 1], ['status' => 'open']);
+        $student = Student::create(['student_id' => 'CORRECT001', 'full_name' => 'Correction Student', 'payout_track' => 'renewal']);
+        $source = StudentCycle::create([
+            'student_id' => $student->id,
+            'academic_cycle_id' => $sourceCycle->id,
+            'payroll_qualified' => true,
+            'year_level' => '2nd Year',
+        ]);
+        $source->requirements()->create(['renewal_liquidation' => true]);
+        $target = StudentCycle::create(['student_id' => $student->id, 'academic_cycle_id' => $targetCycle->id]);
+
+        $this->actingAs($encoder)->get('/records/cycle-correction')->assertForbidden();
+        $this->actingAs($admin)->get("/records/cycle-correction?source_cycle_id={$sourceCycle->id}&target_cycle_id={$targetCycle->id}")
+            ->assertOk()->assertSee('Correction Student')->assertSee('Merge and remove source records');
+
+        $this->actingAs($admin)->post('/records/cycle-correction', [
+            'source_cycle_id' => $sourceCycle->id,
+            'target_cycle_id' => $targetCycle->id,
+            'confirmation' => '1',
+        ])->assertRedirect();
+
+        $this->assertDatabaseMissing('student_cycles', ['id' => $source->id]);
+        $this->assertDatabaseHas('student_cycles', ['id' => $target->id, 'payroll_qualified' => true]);
+        $this->assertDatabaseHas('student_cycle_requirements', ['student_cycle_id' => $target->id, 'renewal_liquidation' => true]);
+        $this->assertDatabaseHas('activity_logs', ['action' => 'records.cycle-correction', 'user_id' => $admin->id]);
+    }
 }

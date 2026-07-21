@@ -9,6 +9,7 @@ use App\Http\Controllers\RecordsController;
 use App\Http\Controllers\ActivityLogController;
 use App\Http\Controllers\StudentHistoryController;
 use App\Http\Controllers\ProfileController;
+use App\Http\Controllers\CycleCorrectionController;
 use Illuminate\Support\Facades\Route;
 
 Route::middleware('guest')->group(function () {
@@ -44,6 +45,8 @@ Route::middleware(['auth', 'role:admin'])->group(function () {
     Route::post('/payrolls/recovery/revert', [PayrollController::class, 'revert'])->name('payrolls.recovery.revert');
     Route::post('/payrolls/{studentCycle}/mark-payrolled', [PayrollController::class, 'markPayrolled'])->name('payrolls.mark-payrolled');
     Route::get('/activity', [ActivityLogController::class, 'index'])->name('activity.index');
+    Route::get('/records/cycle-correction', [CycleCorrectionController::class, 'index'])->name('records.cycle-correction');
+    Route::post('/records/cycle-correction', [CycleCorrectionController::class, 'merge'])->name('records.cycle-correction.merge');
 });
 
 Route::middleware(['auth', 'role:admin'])->prefix('users')->name('users.')->group(function () {
