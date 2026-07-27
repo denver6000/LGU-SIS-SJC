@@ -27,6 +27,29 @@ function chunkStudents(students) {
     return chunks;
 }
 
+const sortCollator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
+
+function batchLabel(student) {
+    return String(student.batch ?? '').trim() || 'Unassigned batch';
+}
+
+function sortStudents(students) {
+    return [...students].sort((left, right) => {
+        const leftBatch = String(left.batch ?? '').trim();
+        const rightBatch = String(right.batch ?? '').trim();
+        if (!leftBatch && rightBatch) return 1;
+        if (leftBatch && !rightBatch) return -1;
+
+        const batchOrder = sortCollator.compare(leftBatch, rightBatch);
+        if (batchOrder !== 0) return batchOrder;
+
+        const nameOrder = sortCollator.compare(String(left.full_name ?? '').trim(), String(right.full_name ?? '').trim());
+        if (nameOrder !== 0) return nameOrder;
+
+        return sortCollator.compare(String(left.student_id ?? ''), String(right.student_id ?? ''));
+    });
+}
+
 function formatLongDate(value) {
     if (!value) return '';
     const date = new Date(`${value}T00:00:00`);
@@ -47,7 +70,7 @@ function buildWordData(students, metadata) {
         date_of_filing: formatLongDate(metadata.date_of_filing),
         school_year: metadata.school_year || '',
         sem_number: formatSemester(metadata.sem_number),
-        selected_count: students.length,
+        selected_count: metadata.total_count ?? students.length,
         students: students.map((student, index) => ({
             no: index + 1,
             student_id: student.student_id || '',
@@ -109,21 +132,57 @@ function replaceCellXml(sheetXml, address, value) {
     return sheetXml.replace(pattern, cellStart + ' t="inlineStr"><is><t xml:space="preserve">' + escapeXml(value) + '</t></is></c>');
 }
 
-async function buildWordBlob(students, metadata) {
-    const response = await fetch('/templates/PAYROLL_WORD_TEMPLATE.docx', { credentials: 'same-origin', cache: 'no-store' });
-    if (!response.ok) throw new Error(`Unable to load Word template: ${response.status}`);
-    const doc = new Docxtemplater(new PizZip(await response.arrayBuffer()), { paragraphLoop: true, linebreaks: true });
-    doc.render(buildWordData(students, metadata));
-    return doc.getZip().generate({ type: 'blob', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
+async function loadTemplate(url, label) {
+    const response = await fetch(url, { credentials: 'same-origin', cache: 'no-store' });
+    if (!response.ok) throw new Error(`Unable to load ${label} template: ${response.status}`);
+    return response.arrayBuffer();
 }
 
-async function buildExcelBlob(students, sheetNumber, totalSheets) {
-    const response = await fetch('/templates/PAYROLL_TEMPLATE.xlsx', { credentials: 'same-origin', cache: 'no-store' });
-    if (!response.ok) throw new Error(`Unable to load Excel template: ${response.status}`);
-    const zip = new PizZip(await response.arrayBuffer());
-    const sheet = zip.file('xl/worksheets/sheet1.xml');
-    if (!sheet) throw new Error('Payroll Excel template is missing the first worksheet.');
-    let xml = replaceCellXml(sheet.asText(), 'O3', `Sheet ${sheetNumber} of ${totalSheets} Sheets`);
+function documentBodyContent(documentXml) {
+    const bodyStart = documentXml.indexOf('<w:body>');
+    const bodyEnd = documentXml.lastIndexOf('</w:body>');
+    if (bodyStart < 0 || bodyEnd < 0) throw new Error('Word template has no document body.');
+    const body = documentXml.slice(bodyStart + '<w:body>'.length, bodyEnd);
+    const sectionStart = body.lastIndexOf('<w:sectPr');
+    return { content: sectionStart >= 0 ? body.slice(0, sectionStart) : body, section: sectionStart >= 0 ? body.slice(sectionStart) : '' };
+}
+
+function mergeWordDocuments(documentXmls) {
+    if (!documentXmls.length) throw new Error('No Word document groups were generated.');
+    const first = documentXmls[0];
+    const firstBodyStart = first.indexOf('<w:body>');
+    const firstBodyEnd = first.lastIndexOf('</w:body>');
+    const sections = documentBodyContent(first);
+    const pageBreak = '<w:p><w:r><w:br w:type="page"/></w:r></w:p>';
+    const content = documentXmls.map((xml) => documentBodyContent(xml).content).join(pageBreak);
+    return first.slice(0, firstBodyStart + '<w:body>'.length)
+        + content
+        + sections.section
+        + '</w:body>'
+        + first.slice(firstBodyEnd + '</w:body>'.length);
+}
+
+function buildWordDocumentXml(students, metadata, templateBuffer) {
+    const doc = new Docxtemplater(new PizZip(templateBuffer), { paragraphLoop: true, linebreaks: true });
+    doc.render(buildWordData(students, metadata));
+    return doc.getZip().file('word/document.xml').asText();
+}
+
+function worksheetName(batch, part, usedNames) {
+    const cleaned = String(batch || 'Unassigned batch').replace(/[:\\/?*\[\]]/g, '-').trim() || 'Unassigned batch';
+    const base = `${cleaned} - Part ${String(part).padStart(2, '0')}`.slice(0, 31);
+    let name = base;
+    let suffix = 2;
+    while (usedNames.has(name)) {
+        const ending = `-${suffix++}`;
+        name = `${base.slice(0, 31 - ending.length)}${ending}`;
+    }
+    usedNames.add(name);
+    return name;
+}
+
+function buildExcelSheetXml(templateXml, students, sheetNumber, totalSheets) {
+    let xml = replaceCellXml(templateXml, 'O3', `Sheet ${sheetNumber} of ${totalSheets} Sheets`);
     for (let row = EXCEL_START_ROW; row <= EXCEL_END_ROW + 1; row += 1) {
         xml = replaceCellXml(xml, `B${row}`, '');
         if (row <= EXCEL_END_ROW) {
@@ -138,28 +197,73 @@ async function buildExcelBlob(students, sheetNumber, totalSheets) {
         xml = replaceCellXml(xml, `J${row}`, DEFAULT_AMOUNT);
     });
     xml = replaceCellXml(xml, `B${EXCEL_START_ROW + students.length}`, END_MARKER);
-    xml = replaceCellXml(xml, 'J25', students.length * DEFAULT_AMOUNT);
-    zip.file('xl/worksheets/sheet1.xml', xml);
+    return replaceCellXml(xml, 'J25', students.length * DEFAULT_AMOUNT);
+}
+
+function buildExcelWorkbookBlob(groups, metadata, templateBuffer) {
+    const zip = new PizZip(templateBuffer);
+    const sheet = zip.file('xl/worksheets/sheet1.xml');
+    if (!sheet) throw new Error('Payroll Excel template is missing the first worksheet.');
+
+    const usedNames = new Set();
+    const totalSheets = groups.length;
+    const sheets = groups.map((group, index) => ({
+        name: worksheetName(batchLabel(group[0]), index + 1, usedNames),
+        xml: buildExcelSheetXml(sheet.asText(), group, index + 1, totalSheets),
+    }));
+    sheets.forEach((item, index) => zip.file(`xl/worksheets/sheet${index + 1}.xml`, item.xml));
+
+    const workbook = zip.file('xl/workbook.xml');
+    const relationships = zip.file('xl/_rels/workbook.xml.rels');
+    const contentTypes = zip.file('[Content_Types].xml');
+    if (!workbook || !relationships || !contentTypes) throw new Error('Payroll Excel template is missing workbook metadata.');
+
+    const workbookXml = workbook.asText().replace(/<sheets>[\s\S]*?<\/sheets>/, `<sheets>${sheets.map((item, index) => `<sheet name="${escapeXml(item.name)}" sheetId="${index + 1}" r:id="rId${index === 0 ? 1 : index + 4}"/>`).join('')}</sheets>`);
+    const relXml = relationships.asText().replace('</Relationships>', `${sheets.slice(1).map((_, index) => `<Relationship Id="rId${index + 5}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${index + 2}.xml"/>`).join('')}</Relationships>`);
+    const typeXml = contentTypes.asText().replace('</Types>', `${sheets.slice(1).map((_, index) => `<Override PartName="/xl/worksheets/sheet${index + 2}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join('')}</Types>`);
+    zip.file('xl/workbook.xml', workbookXml);
+    zip.file('xl/_rels/workbook.xml.rels', relXml);
+    zip.file('[Content_Types].xml', typeXml);
+
     return zip.generate({ type: 'blob', mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', compression: 'DEFLATE' });
 }
 
 async function exportPayrollFiles(students, metadata, filenamePrefix) {
     if (!students.length) throw new Error('Select at least one student before exporting payroll files.');
-    const groups = chunkStudents(students);
+    const sortedStudents = sortStudents(students);
+    const groups = chunkStudents(sortedStudents);
+    const [wordTemplate, excelTemplate] = await Promise.all([
+        loadTemplate('/templates/PAYROLL_WORD_TEMPLATE.docx', 'Word'),
+        loadTemplate('/templates/PAYROLL_TEMPLATE.xlsx', 'Excel'),
+    ]);
+    const wordXmlGroups = groups.map((group) => buildWordDocumentXml(group, { ...metadata, total_count: sortedStudents.length }, wordTemplate));
+    const wordZip = new PizZip(wordTemplate);
+    wordZip.file('word/document.xml', mergeWordDocuments(wordXmlGroups));
+    const wordBlob = wordZip.generate({ type: 'blob', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', compression: 'DEFLATE' });
+    const excelBlob = buildExcelWorkbookBlob(groups, metadata, excelTemplate);
     const archive = new PizZip();
-    for (const [index, group] of groups.entries()) {
-        const part = String(index + 1).padStart(2, '0');
-        const [wordBlob, excelBlob] = await Promise.all([buildWordBlob(group, metadata), buildExcelBlob(group, index + 1, groups.length)]);
-        archive.file(`${filenamePrefix}/group-${part}/${filenamePrefix}-group-${part}.docx`, await wordBlob.arrayBuffer());
-        archive.file(`${filenamePrefix}/group-${part}/${filenamePrefix}-group-${part}.xlsx`, await excelBlob.arrayBuffer());
-    }
-    downloadBlob(`${filenamePrefix}-${groups.length}-groups.zip`, archive.generate({ type: 'blob', mimeType: 'application/zip', compression: 'DEFLATE' }));
-    return groups.length;
+    archive.file(`${filenamePrefix}/${filenamePrefix}.docx`, await wordBlob.arrayBuffer());
+    archive.file(`${filenamePrefix}/${filenamePrefix}.xlsx`, await excelBlob.arrayBuffer());
+    downloadBlob(`${filenamePrefix}.zip`, archive.generate({ type: 'blob', mimeType: 'application/zip', compression: 'DEFLATE' }));
+    return { groups: groups.length, students: sortedStudents };
 }
 
-document.addEventListener('DOMContentLoaded', () => {
+export { chunkStudents, sortStudents, buildWordDocumentXml, mergeWordDocuments, buildExcelWorkbookBlob };
+
+if (typeof document !== 'undefined') document.addEventListener('DOMContentLoaded', () => {
     const selectAllButtons = [...document.querySelectorAll('[data-payroll-select-all]')];
     const studentCheckboxes = [...document.querySelectorAll('[data-payroll-student]')];
+    const allRows = JSON.parse(document.querySelector('#payroll-export-data')?.textContent || '[]');
+    const summary = document.querySelector('[data-payroll-export-summary]');
+    const selectedStudents = () => {
+        const selectedIds = new Set(studentCheckboxes.filter((checkbox) => checkbox.checked).map((checkbox) => String(checkbox.value)));
+        return sortStudents(allRows.filter((student) => selectedIds.has(String(student.student_cycle_id))));
+    };
+    const updateExportSummary = () => {
+        if (!summary) return;
+        const selected = selectedStudents();
+        summary.textContent = `Selected students: ${selected.length} · Excel sheets: ${Math.ceil(selected.length / MAX_STUDENTS)} · Order: batch, then name`;
+    };
     if (selectAllButtons.length) {
         const syncSelectAllButton = () => {
             const allSelected = studentCheckboxes.length > 0 && studentCheckboxes.every((checkbox) => checkbox.checked);
@@ -172,22 +276,31 @@ document.addEventListener('DOMContentLoaded', () => {
             const shouldSelect = !studentCheckboxes.length || !studentCheckboxes.every((checkbox) => checkbox.checked);
             studentCheckboxes.forEach((checkbox) => { checkbox.checked = shouldSelect; });
             syncSelectAllButton();
+            updateExportSummary();
         }));
-        studentCheckboxes.forEach((checkbox) => checkbox.addEventListener('change', syncSelectAllButton));
+        studentCheckboxes.forEach((checkbox) => checkbox.addEventListener('change', () => {
+            syncSelectAllButton();
+            updateExportSummary();
+        }));
         syncSelectAllButton();
+        updateExportSummary();
     }
 
     const button = document.querySelector('[data-payroll-export]');
     if (!button) return;
     button.addEventListener('click', async () => {
-        const selectedIds = new Set([...document.querySelectorAll('[data-payroll-student]:checked')].map((input) => input.value));
-        const allRows = JSON.parse(document.querySelector('#payroll-export-data')?.textContent || '[]');
-        const students = allRows.filter((student) => selectedIds.has(String(student.student_id)));
+        const students = selectedStudents();
+        const checkedCount = studentCheckboxes.filter((checkbox) => checkbox.checked).length;
         const date = document.querySelector('[name="date_of_filing"]')?.value?.trim() || '';
         const semester = document.querySelector('[name="export_semester"]')?.value?.trim() || '';
         if (!date) return alert('Fill in the Date Of Filing before creating payroll files.');
         if (!semester) return alert('Type the semester for the export before creating payroll files.');
         if (!students.length) return alert('Select at least one student before creating payroll files.');
+        if (students.length !== checkedCount) return alert('The selected payroll rows no longer match the export data. Refresh the page and try again.');
+        const groups = chunkStudents(students);
+        const batchOrder = [...new Set(students.map(batchLabel))].join(', ');
+        const firstRows = students.slice(0, 5).map((student) => `${batchLabel(student)} — ${student.full_name || student.student_id}`).join('\n');
+        if (!window.confirm(`Export ${students.length} student(s) as 1 Word document and 1 Excel workbook with ${groups.length} worksheet(s)?\n\nSorted batches: ${batchOrder}\n\nFirst students in final order:\n${firstRows}`)) return;
         button.disabled = true;
         button.textContent = 'Creating...';
         try {
