@@ -43,14 +43,6 @@ function sortStudents(students) {
         const yearOrder = sortCollator.compare(leftYear, rightYear);
         if (yearOrder !== 0) return yearOrder;
 
-        const leftBatch = String(left.batch ?? '').trim();
-        const rightBatch = String(right.batch ?? '').trim();
-        if (!leftBatch && rightBatch) return 1;
-        if (leftBatch && !rightBatch) return -1;
-
-        const batchOrder = sortCollator.compare(leftBatch, rightBatch);
-        if (batchOrder !== 0) return batchOrder;
-
         const nameOrder = sortCollator.compare(String(left.full_name ?? '').trim(), String(right.full_name ?? '').trim());
         if (nameOrder !== 0) return nameOrder;
 
@@ -270,7 +262,7 @@ if (typeof document !== 'undefined') document.addEventListener('DOMContentLoaded
     const updateExportSummary = () => {
         if (!summary) return;
         const selected = selectedStudents();
-        summary.textContent = `Selected students: ${selected.length} · Excel sheets: ${Math.ceil(selected.length / MAX_STUDENTS)} · Order: year level, batch, then name`;
+        summary.textContent = `Selected students: ${selected.length} · Excel sheets: ${Math.ceil(selected.length / MAX_STUDENTS)} · Order: year level, then name`;
     };
     if (selectAllButtons.length) {
         const syncSelectAllButton = () => {
@@ -307,9 +299,8 @@ if (typeof document !== 'undefined') document.addEventListener('DOMContentLoaded
         if (students.length !== checkedCount) return alert('The selected payroll rows no longer match the export data. Refresh the page and try again.');
         const groups = chunkStudents(sortStudents(students));
         const yearLevelOrder = [...new Set(students.map((student) => String(student.year_level || 'Unassigned year level').trim()))].join(', ');
-        const batchOrder = [...new Set(students.map(batchLabel))].join(', ');
         const firstRows = students.slice(0, 5).map((student) => `${batchLabel(student)} — ${student.full_name || student.student_id}`).join('\n');
-        if (!window.confirm(`Export ${students.length} student(s) as 1 Word document and 1 Excel workbook with ${groups.length} worksheet(s)?\n\nSort order: year level, batch, then name\nYear levels: ${yearLevelOrder}\nBatches: ${batchOrder}\n\nFirst students in final order:\n${firstRows}`)) return;
+        if (!window.confirm(`Export ${students.length} student(s) as 1 Word document and 1 Excel workbook with ${groups.length} worksheet(s)?\n\nSort order: year level, then name\nYear levels: ${yearLevelOrder}\n\nFirst students in final order:\n${firstRows}`)) return;
         button.disabled = true;
         button.textContent = 'Creating...';
         try {
