@@ -37,6 +37,7 @@
         <label>Date Of Filing<input type="date" name="date_of_filing" required></label>
         <label>Semester for export<input type="text" name="export_semester" value="" placeholder="e.g. 1st Semester" required></label>
         <p class="muted">These export fields are manual. Confirm the date and semester before creating the files.</p>
+        <p class="muted payroll-export-summary" data-payroll-export-summary>Selected students: 0 · Excel sheets: 0 · Order: batch, then name</p>
         <div>
             <button class="secondary-button" type="button" data-payroll-select-all>Select all</button>
             <button class="primary-button" type="button" data-payroll-export>Create Payroll Files</button>
