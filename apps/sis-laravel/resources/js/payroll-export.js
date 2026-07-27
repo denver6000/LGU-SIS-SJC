@@ -248,14 +248,16 @@ async function exportPayrollFiles(students, metadata, filenamePrefix) {
     return { groups: groups.length, students: sortedStudents };
 }
 
-document.addEventListener('DOMContentLoaded', () => {
+export { chunkStudents, sortStudents, buildWordDocumentXml, mergeWordDocuments, buildExcelWorkbookBlob };
+
+if (typeof document !== 'undefined') document.addEventListener('DOMContentLoaded', () => {
     const selectAllButtons = [...document.querySelectorAll('[data-payroll-select-all]')];
     const studentCheckboxes = [...document.querySelectorAll('[data-payroll-student]')];
     const allRows = JSON.parse(document.querySelector('#payroll-export-data')?.textContent || '[]');
     const summary = document.querySelector('[data-payroll-export-summary]');
     const selectedStudents = () => {
         const selectedIds = new Set(studentCheckboxes.filter((checkbox) => checkbox.checked).map((checkbox) => String(checkbox.value)));
-        return sortStudents(allRows.filter((student) => selectedIds.has(String(student.student_id))));
+        return sortStudents(allRows.filter((student) => selectedIds.has(String(student.student_cycle_id))));
     };
     const updateExportSummary = () => {
         if (!summary) return;
@@ -288,11 +290,13 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!button) return;
     button.addEventListener('click', async () => {
         const students = selectedStudents();
+        const checkedCount = studentCheckboxes.filter((checkbox) => checkbox.checked).length;
         const date = document.querySelector('[name="date_of_filing"]')?.value?.trim() || '';
         const semester = document.querySelector('[name="export_semester"]')?.value?.trim() || '';
         if (!date) return alert('Fill in the Date Of Filing before creating payroll files.');
         if (!semester) return alert('Type the semester for the export before creating payroll files.');
         if (!students.length) return alert('Select at least one student before creating payroll files.');
+        if (students.length !== checkedCount) return alert('The selected payroll rows no longer match the export data. Refresh the page and try again.');
         const groups = chunkStudents(students);
         const batchOrder = [...new Set(students.map(batchLabel))].join(', ');
         const firstRows = students.slice(0, 5).map((student) => `${batchLabel(student)} — ${student.full_name || student.student_id}`).join('\n');

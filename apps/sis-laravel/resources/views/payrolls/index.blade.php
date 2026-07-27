@@ -2,12 +2,12 @@
 @section('content')
 <div class="page-heading"><div><p class="eyebrow">Payrolls</p><h1>Payroll preparation</h1><p class="muted">Qualified students with complete submitted requirements for the selected cycle.</p></div></div>
 <form method="GET" class="timeline-toolbar">
+    <label>Year level<input name="year_level" value="{{ $yearLevel }}" placeholder="e.g. 2nd Year"></label>
     <label>School year<select name="school_year" onchange="this.form.submit()">@foreach($schoolYears as $year)<option value="{{ $year }}" @selected($schoolYear === $year)>{{ $year }}</option>@endforeach</select></label>
     <label>Semester<select name="semester_number" onchange="this.form.submit()"><option value="1" @selected($semesterNumber === 1)>1st Semester</option><option value="2" @selected($semesterNumber === 2)>2nd Semester</option></select></label>
     <label>Search student<input name="search" value="{{ $search }}" placeholder="Name, ID, address, barangay"></label>
     <label>School<input name="school" value="{{ $school }}" placeholder="School"></label>
     <label>Batch<input name="batch" value="{{ $batch }}" placeholder="Batch"></label>
-    <label>Year level<input name="year_level" value="{{ $yearLevel }}" placeholder="e.g. 2nd Year"></label>
     <input type="hidden" name="type" value="{{ $type }}">
     <input type="hidden" name="status" value="{{ $status }}">
     <button class="primary-button" type="submit">Filter</button>
@@ -69,7 +69,7 @@
             <tr>
                 <td>
                     @if ($status === 'ready')
-                        <input type="checkbox" data-payroll-student value="{{ $studentCycle->student->student_id }}">
+                        <input type="checkbox" data-payroll-student value="{{ $studentCycle->id }}">
                     @else
                         <span class="status-pill qualified">Payrolled</span>
                     @endif
@@ -102,6 +102,7 @@
 @php
     $exportRows = $payrollRows->map(function ($studentCycle) {
         return [
+            'student_cycle_id' => $studentCycle->id,
             'student_id' => $studentCycle->student->student_id,
             'full_name' => $studentCycle->student->full_name,
             'student_number' => $studentCycle->student->student_number,
