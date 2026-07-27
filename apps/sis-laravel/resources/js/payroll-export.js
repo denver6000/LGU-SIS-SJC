@@ -27,6 +27,28 @@ function chunkStudents(students) {
     return chunks;
 }
 
+const sortCollator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
+
+function sortStudents(students) {
+    return [...students].sort((left, right) => {
+        const leftYear = String(left.year_level ?? '').trim();
+        const rightYear = String(right.year_level ?? '').trim();
+        if (!leftYear && rightYear) return 1;
+        if (leftYear && !rightYear) return -1;
+
+        const yearOrder = sortCollator.compare(leftYear, rightYear);
+        if (yearOrder !== 0) return yearOrder;
+
+        const batchOrder = sortCollator.compare(String(left.batch ?? '').trim(), String(right.batch ?? '').trim());
+        if (batchOrder !== 0) return batchOrder;
+
+        const nameOrder = sortCollator.compare(String(left.full_name ?? '').trim(), String(right.full_name ?? '').trim());
+        if (nameOrder !== 0) return nameOrder;
+
+        return sortCollator.compare(String(left.student_id ?? ''), String(right.student_id ?? ''));
+    });
+}
+
 function formatLongDate(value) {
     if (!value) return '';
     const date = new Date(`${value}T00:00:00`);
@@ -145,7 +167,7 @@ async function buildExcelBlob(students, sheetNumber, totalSheets) {
 
 async function exportPayrollFiles(students, metadata, filenamePrefix) {
     if (!students.length) throw new Error('Select at least one student before exporting payroll files.');
-    const groups = chunkStudents(students);
+    const groups = chunkStudents(sortStudents(students));
     const archive = new PizZip();
     for (const [index, group] of groups.entries()) {
         const part = String(index + 1).padStart(2, '0');
@@ -180,9 +202,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const button = document.querySelector('[data-payroll-export]');
     if (!button) return;
     button.addEventListener('click', async () => {
-        const selectedIds = new Set([...document.querySelectorAll('[data-payroll-student]:checked')].map((input) => input.value));
+        const selectedIds = new Set([...document.querySelectorAll('[data-payroll-student]:checked')].map((input) => String(input.value)));
         const allRows = JSON.parse(document.querySelector('#payroll-export-data')?.textContent || '[]');
-        const students = allRows.filter((student) => selectedIds.has(String(student.student_id)));
+        const students = allRows.filter((student) => selectedIds.has(String(student.student_cycle_id)));
         const date = document.querySelector('[name="date_of_filing"]')?.value?.trim() || '';
         const semester = document.querySelector('[name="export_semester"]')?.value?.trim() || '';
         if (!date) return alert('Fill in the Date Of Filing before creating payroll files.');
